@@ -22,6 +22,7 @@ fi
 if [[ ! -d "$WINDOWS_MOUNT/Windows" ]]; then
     echo "ERROR: Windows installation not found at: $WINDOWS_MOUNT" >&2
     echo "       Mount/expose the Windows filesystem there or set WINDOWS_MOUNT in inventor.env." >&2
+    echo "       For the included Windows staging VM workflow, see docs/windows-vm.md." >&2
     exit 1
 fi
 

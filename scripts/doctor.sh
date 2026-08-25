@@ -49,7 +49,7 @@ if [[ -d "$WINDOWS_MOUNT/Windows" ]]; then
     [[ -d "$WINDOWS_MOUNT/Program Files/Autodesk/AdskIdentityManager/Current" ]] && ok "Autodesk Identity Manager source found" || fail "Identity Manager Current directory missing"
     [[ -d "$WINDOWS_MOUNT/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/$ADSK_LICENSING_VERSION" ]] && ok "Autodesk Licensing $ADSK_LICENSING_VERSION source found" || fail "Expected Autodesk Licensing $ADSK_LICENSING_VERSION source missing"
 else
-    fail "Windows source is not mounted at $WINDOWS_MOUNT"
+    fail "Windows source is not mounted at $WINDOWS_MOUNT (Linux-only server: see docs/windows-vm.md)"
 fi
 
 if [[ -f "$PROJECT_DIR/registry/autodesk-full.reg" ]]; then ok "Autodesk registry export exists"; else warn "registry/autodesk-full.reg not created yet; run export-registry.sh"; fi

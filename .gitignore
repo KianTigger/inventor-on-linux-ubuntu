@@ -4,3 +4,5 @@ logs/
 backtrace*.txt
 registry/autodesk-full.reg
 inventor.env
+
+windows-vm.env

@@ -57,6 +57,10 @@ You need access to a Windows installation where Inventor 2026 is already install
 
 This can be a mounted Windows partition, a read-only copy of a Windows filesystem, or another filesystem exposed to Ubuntu with the same directory structure. Configure a different location in `inventor.env` if needed.
 
+**No existing Windows partition on the Linux server?** This port now includes a complete Windows 11 staging-VM workflow using KVM/QEMU + libvirt. Install Inventor normally in the VM, shut Windows down, then mount the VM's C: drive read-only at `/mnt/windows` with `libguestfs`. See **[docs/windows-vm.md](docs/windows-vm.md)**.
+
+The VM path is designed for a Linux-only server: its VNC console binds only to server localhost and is reached through an SSH tunnel. It does not require exposing a VNC port publicly.
+
 Required source locations include:
 
 ```text
@@ -83,22 +87,26 @@ nano inventor.env
 # 2. Install Ubuntu dependencies, WineHQ 11.4, DXVK 2.7.1 and WebView2
 bash scripts/phase0-setup.sh
 
-# 3. Check the host, Vulkan, display and Windows source
+# 3. Prepare a Windows source. If this server has no Windows partition, use:
+#    docs/windows-vm.md
+# The VM workflow ends with its offline C: drive mounted at /mnt/windows.
+
+# 4. Check the host, Vulkan, display and mounted Windows source
 bash scripts/doctor.sh
 
-# 4. Export Autodesk registry data from the mounted Windows installation
+# 5. Export Autodesk registry data from the mounted Windows installation
 bash scripts/export-registry.sh
 
-# 5. Build a fresh Wine prefix from the Windows source
+# 6. Build a fresh Wine prefix from the Windows source
 bash scripts/rebuild-prefix.sh
 
-# 6. Build/install the Wine 11.4 Win32_TimeZone patch
+# 7. Build/install the Wine 11.4 Win32_TimeZone patch
 bash scripts/install-wbemprox-patch.sh
 
-# 7. Register Autodesk OAuth callback and desktop integration
+# 8. Register Autodesk OAuth callback and desktop integration
 bash scripts/setup-user-integration.sh
 
-# 8. Re-run checks, then launch
+# 9. Re-run checks, then launch
 bash scripts/doctor.sh
 bash scripts/launch-inventor.sh
 ```
@@ -285,7 +293,31 @@ The simplest layout is:
 /mnt/windows/Users
 ```
 
-A physical NTFS partition can be mounted read-only if desired; the scripts only read the Windows source. A Windows VM can also be used if you can expose/copy its filesystem to Ubuntu while preserving the directory layout and registry hive files.
+A physical NTFS partition can be mounted read-only if desired; the scripts only read the Windows source.
+
+### Recommended for a Linux-only server: Windows staging VM
+
+This repository includes Ubuntu 22.04 KVM/libvirt helpers:
+
+```bash
+cp windows-vm.env.example windows-vm.env
+nano windows-vm.env
+
+bash scripts/vm/setup-windows-vm-host.sh
+# Log out/in after the group-membership change.
+
+bash scripts/vm/create-windows-vm.sh
+```
+
+Install Windows 11 + Inventor 2026 in the VM, disable hibernation and BitLocker/device encryption, shut the VM down, then:
+
+```bash
+bash scripts/vm/mount-windows-vm.sh
+```
+
+This produces the expected `/mnt/windows/Windows`, `Program Files`, `ProgramData` and `Users` tree without copying the whole VM. The mount is read-only. **Do not start the VM while that mount is active.**
+
+The complete installation/console/Windows-preparation/lifecycle instructions are in **[docs/windows-vm.md](docs/windows-vm.md)**.
 
 Before rebuilding, verify:
 
@@ -556,7 +588,16 @@ Fix all `FAIL` entries before rebuilding. Warnings can be contextual (for exampl
 ## Project structure
 
 ```text
-inventor.env.example               Local configuration template
+inventor.env.example               Local Wine/Inventor configuration template
+windows-vm.env.example             Windows 11 staging-VM configuration template
+docs/windows-vm.md                 KVM/libvirt Windows VM setup and lifecycle
+scripts/vm/setup-windows-vm-host.sh Install KVM/libvirt/OVMF/swtpm/libguestfs
+scripts/vm/create-windows-vm.sh    Create Windows 11 UEFI/TPM staging VM
+scripts/vm/doctor-windows-vm.sh    Non-destructive KVM/VM/source status report
+scripts/vm/start-windows-vm.sh     Safely start the staging VM
+scripts/vm/stop-windows-vm.sh      Request and wait for clean shutdown
+scripts/vm/mount-windows-vm.sh     Mount offline Windows C: read-only
+scripts/vm/unmount-windows-vm.sh   Unmount before starting Windows again
 scripts/common.sh                  Shared Ubuntu/config/Wine/display helpers
 scripts/phase0-setup.sh            Ubuntu packages + WineHQ 11.4 + DXVK + WebView2
 scripts/doctor.sh                  Non-destructive preflight report
