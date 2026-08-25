@@ -20,7 +20,7 @@ This document is for developers who want to improve Wine compatibility for Autod
 
 You need:
 
-- Wine 11.4 **source tree** — for patching and `winedbg`
+- Ubuntu 22.04 host with Wine 11.4 **source tree** — for patching and `winedbg`
 - `x86_64-w64-mingw32-objdump`, `radare2`, or Ghidra — for static analysis of Inventor DLLs
 - `winedbg` — Wine's built-in debugger (ships with Wine)
 - Standard build tools: `gcc`, `make`, `flex`, `bison`
@@ -228,10 +228,16 @@ The binary patch cannot be upstreamed — it modifies a proprietary DLL. The cor
 
 ```
 scripts/
+  common.sh                # Shared config/Wine/display helpers
+  doctor.sh                # Non-destructive host/source checks
+  list-gpus.sh             # Vulkan UUID and NVIDIA utilization helper
   launch-inventor.sh       # Start services in order, then launch Inventor
-  rebuild-prefix.sh        # Full prefix rebuild from Windows source (28 steps)
-  adskidmgr-callback.sh    # xdg-mime handler: deliver OAuth2 code to running IdMgr
-  phase0-setup.sh          # Install system prerequisites (pacman packages)
+  rebuild-prefix.sh        # Full prefix rebuild from Windows source
+  install-dxvk-prefix.sh   # Install upstream DXVK DLLs into prefix
+  install-wbemprox-patch.sh # Build/install Wine WMI patch
+  setup-user-integration.sh # OAuth handler and desktop launcher
+  adskidmgr-callback.sh    # xdg-mime handler: deliver OAuth2 code to IdMgr
+  phase0-setup.sh          # Ubuntu 22.04 prerequisites + pinned Wine/DXVK
 patches/
   wbemprox-timezone.patch  # Adds Win32_TimeZone to Wine's wbemprox
 registry/
@@ -249,6 +255,6 @@ logs/                      # Wine debug logs, gitignored
 
 - **Test with a clean prefix.** Run `rebuild-prefix.sh` from scratch. Don't test on a prefix that has manual modifications.
 - **Wine patches:** verify they build cleanly against Wine 11.4 source with `make -C dlls/<affected>`.
-- **rebuild-prefix.sh changes:** test the full 28-step run. The script starts with `rm -rf "$WINEPREFIX"`.
+- **rebuild-prefix.sh changes:** test a full clean run. The script deletes `WINEPREFIX` only after source/preflight checks and user confirmation (or `--force`).
 - **Addin status changes:** update `notes/disabled-addins.md`.
 - **Significant compatibility improvement:** add a session history entry to the README with the date and a one-paragraph summary of what changed.

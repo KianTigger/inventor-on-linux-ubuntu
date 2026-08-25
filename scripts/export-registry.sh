@@ -1,59 +1,51 @@
-#!/bin/bash
-# Export Autodesk registry keys from a Windows installation.
-# Generates registry/autodesk-full.reg from the Windows hive files directly,
-# so no Autodesk data needs to be committed to the repo.
-#
-# Requires: hivex (sudo pacman -S hivex)
-# Usage:    bash scripts/export-registry.sh [/mnt/windows]
+#!/usr/bin/env bash
+# Export Autodesk registry keys directly from the mounted Windows registry
+# hives. The generated registry/autodesk-full.reg remains gitignored.
 
 set -euo pipefail
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+# shellcheck source=common.sh
+source "$SCRIPT_DIR/common.sh"
 
-WINDOWS="${1:-/mnt/windows}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUTPUT="$SCRIPT_DIR/../registry/autodesk-full.reg"
+if [[ $# -ge 1 ]]; then
+    WINDOWS_MOUNT="$1"
+fi
 
-# Verify hivex is available
-if ! command -v hivexregedit &>/dev/null; then
-    echo "ERROR: hivexregedit not found. Install hivex:"
-    echo "  sudo pacman -S hivex"
+if ! command -v hivexregedit >/dev/null 2>&1; then
+    echo "ERROR: hivexregedit not found." >&2
+    echo "       Ubuntu 22.04: sudo apt install libhivex-bin" >&2
+    echo "       Or run: bash scripts/phase0-setup.sh" >&2
     exit 1
 fi
 
-# Verify Windows partition is mounted
-if [ ! -d "$WINDOWS/Windows" ]; then
-    echo "ERROR: Windows partition not found at $WINDOWS"
-    echo "  Mount it first, or pass the path as an argument:"
-    echo "  bash scripts/export-registry.sh /path/to/windows"
+if [[ ! -d "$WINDOWS_MOUNT/Windows" ]]; then
+    echo "ERROR: Windows installation not found at: $WINDOWS_MOUNT" >&2
+    echo "       Mount/expose the Windows filesystem there or set WINDOWS_MOUNT in inventor.env." >&2
     exit 1
 fi
 
-# Detect first non-system Windows user profile
-WIN_USER=$(ls "$WINDOWS/Users/" 2>/dev/null \
-    | grep -vxE 'Public|Default|Default User|All Users' \
-    | head -1)
-
-if [ -z "$WIN_USER" ]; then
-    echo "ERROR: No user profile found under $WINDOWS/Users/"
+WIN_USER="$(detect_windows_user || true)"
+if [[ -z "$WIN_USER" ]]; then
+    echo "ERROR: Could not auto-detect a Windows user under $WINDOWS_MOUNT/Users." >&2
+    echo "       Set WINDOWS_USER in inventor.env." >&2
     exit 1
 fi
 
-SOFTWARE_HIVE="$WINDOWS/Windows/System32/config/SOFTWARE"
-NTUSER_HIVE="$WINDOWS/Users/$WIN_USER/NTUSER.DAT"
-
-echo "=== Autodesk Registry Exporter ==="
-echo "  Windows:  $WINDOWS"
-echo "  User:     $WIN_USER"
-echo "  Output:   $OUTPUT"
-echo ""
+SOFTWARE_HIVE="$WINDOWS_MOUNT/Windows/System32/config/SOFTWARE"
+NTUSER_HIVE="$WINDOWS_MOUNT/Users/$WIN_USER/NTUSER.DAT"
+OUTPUT="$PROJECT_DIR/registry/autodesk-full.reg"
 
 for hive in "$SOFTWARE_HIVE" "$NTUSER_HIVE"; do
-    if [ ! -f "$hive" ]; then
-        echo "ERROR: Registry hive not found: $hive"
-        exit 1
-    fi
+    [[ -f "$hive" ]] || { echo "ERROR: Registry hive not found: $hive" >&2; exit 1; }
 done
 
 mkdir -p "$(dirname "$OUTPUT")"
+
+echo "=== Autodesk registry export ==="
+echo "Windows source: $WINDOWS_MOUNT"
+echo "Windows user:   $WIN_USER"
+echo "Output:         $OUTPUT"
 
 {
     printf 'Windows Registry Editor Version 5.00\r\n\r\n'
@@ -63,7 +55,7 @@ mkdir -p "$(dirname "$OUTPUT")"
             | sed 's|^\[\\|[HKEY_LOCAL_MACHINE\\SOFTWARE\\|'; then
         echo "      OK" >&2
     else
-        echo "      WARNING: HKLM Autodesk keys not found or export failed" >&2
+        echo "      WARNING: HKLM Autodesk export failed or keys were absent" >&2
     fi
 
     echo "[2/2] Exporting HKCU\\Software\\Autodesk..." >&2
@@ -71,14 +63,9 @@ mkdir -p "$(dirname "$OUTPUT")"
             | sed 's|^\[\\Software\\|[HKEY_CURRENT_USER\\Software\\|'; then
         echo "      OK" >&2
     else
-        echo "      WARNING: HKCU Autodesk keys not found or export failed" >&2
+        echo "      WARNING: HKCU Autodesk export failed or keys were absent" >&2
     fi
-
 } > "$OUTPUT"
 
-LINE_COUNT=$(wc -l < "$OUTPUT")
-echo ""
-echo "=== Export complete ==="
-echo "  $LINE_COUNT lines written to $OUTPUT"
-echo ""
-echo "Next: run scripts/rebuild-prefix.sh"
+echo "Export complete: $(wc -l < "$OUTPUT") lines"
+echo "Next: bash scripts/rebuild-prefix.sh"
