@@ -610,22 +610,132 @@ The mount helper refuses to mount the VM while it is running.
 
 ## 10. Mount the Windows VM at `/mnt/windows`
 
-Run:
+### Important Ubuntu 22.04/libguestfs behavior
 
-```bash
-bash scripts/vm/mount-windows-vm.sh
+On Ubuntu 22.04, the packaged libguestfs/QEMU combination can fail when using the simple automatic mount path even when the Windows VM itself is healthy.
+
+Two failures were observed on the documented `inventor-win11` VM:
+
+```text
+libguestfs: error: /var/lib/libvirt/images/inventor-win11.qcow2: Permission denied
 ```
 
-This uses libguestfs/`guestmount` to inspect the libvirt domain and mounts the Windows C: drive **read-only** at the configured mountpoint.
+and, after switching to the direct backend:
 
-Verify:
+```text
+guestmount: no operating system was found on this disk
+```
+
+The first is a backend/filesystem-permission problem. The second is automatic OS inspection failing to recognize the current Windows 11 installation. Neither requires reinstalling Windows.
+
+Before mounting, verify that the VM is fully off:
 
 ```bash
+virsh domstate inventor-win11
+```
+
+It must report:
+
+```text
+shut off
+```
+
+Do **not** mount a running or suspended VM disk.
+
+### 10.1 Enable FUSE `allow_other`
+
+The direct-backend mount is started with `sudo`, but the repository work is performed as the normal Linux user. Allow the resulting FUSE mount to be visible to that user:
+
+```bash
+grep -qE '^[[:space:]]*user_allow_other' /etc/fuse.conf \
+  || echo 'user_allow_other' | sudo tee -a /etc/fuse.conf
+
+sudo mkdir -p /mnt/windows
+sudo chown "$USER":"$USER" /mnt/windows
+```
+
+### 10.2 Discover the Windows partition
+
+Do not blindly assume a partition number. Inspect the QCOW2 image:
+
+```bash
+sudo env LIBGUESTFS_BACKEND=direct \
+  virt-filesystems \
+    -a /var/lib/libvirt/images/inventor-win11.qcow2 \
+    --all \
+    --long \
+    -h
+```
+
+A normal Windows 11 GPT disk often contains an EFI partition, Microsoft Reserved partition, the main NTFS Windows partition, and a recovery partition.
+
+You can also ask guestfish directly:
+
+```bash
+sudo env LIBGUESTFS_BACKEND=direct \
+  guestfish --ro \
+    -a /var/lib/libvirt/images/inventor-win11.qcow2 <<'EOF'
+run
+list-partitions
+list-filesystems
+inspect-os
+EOF
+```
+
+`inspect-os` may return nothing on Ubuntu 22.04; that is the reason for mounting manually.
+
+For the VM created and tested with these instructions, **Windows C: was `/dev/sda3`**. If your output differs, use the NTFS partition that contains the Windows installation.
+
+If several NTFS partitions are shown, inspect a candidate before mounting it on the host. Example for `/dev/sda3`:
+
+```bash
+sudo env LIBGUESTFS_BACKEND=direct \
+  guestfish --ro \
+    -a /var/lib/libvirt/images/inventor-win11.qcow2 <<'EOF'
+run
+mount-ro /dev/sda3 /
+ls /
+EOF
+```
+
+The correct Windows C: partition should list directories such as:
+
+```text
+Program Files
+Program Files (x86)
+ProgramData
+Users
+Windows
+```
+
+If it instead contains recovery files, inspect the other NTFS partition.
+
+### 10.3 Mount Windows C: read-only
+
+Once the correct partition is known, mount it explicitly. For the tested VM where C: is `/dev/sda3`:
+
+```bash
+sudo env LIBGUESTFS_BACKEND=direct \
+  guestmount \
+    -a /var/lib/libvirt/images/inventor-win11.qcow2 \
+    -m /dev/sda3 \
+    --ro \
+    -o allow_other \
+    -o uid="$(id -u)" \
+    -o gid="$(id -g)" \
+    /mnt/windows
+```
+
+A successful command normally produces no output.
+
+Verify the mount:
+
+```bash
+findmnt /mnt/windows
 ls -la /mnt/windows
-ls -la "/mnt/windows/Program Files/Autodesk/Inventor 2026"
 ```
 
-The top-level tree should resemble:
+The expected top-level tree includes:
 
 ```text
 /mnt/windows/
@@ -636,16 +746,43 @@ The top-level tree should resemble:
 └── Windows
 ```
 
-If mounting fails, re-check:
+Then verify the Inventor source installation:
 
-```text
-powercfg /h off
-manage-bde -status C:
+```bash
+ls "/mnt/windows/Program Files/Autodesk/Inventor 2026"
+ls "/mnt/windows/Program Files/Autodesk/AdskIdentityManager"
+ls "/mnt/windows/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"
 ```
 
-and confirm the VM is fully shut down.
+The tested source showed the expected Inventor directory plus Autodesk Identity Manager under `Program Files/Autodesk`.
 
----
+> **Why does `findmnt` show `rw`?**
+>
+> `findmnt` reports the outer FUSE mount options, and on this Ubuntu setup it may display `rw`. The guest filesystem inside libguestfs is nevertheless mounted read-only because `guestmount` was invoked with `--ro`. Keep `--ro` in every offline Windows mount command.
+
+### 10.4 Do not start Windows while mounted
+
+While `/mnt/windows` is active, leave:
+
+```bash
+virsh domstate inventor-win11
+```
+
+at `shut off`.
+
+When Linux-side extraction is finished, unmount before starting the VM again:
+
+```bash
+sudo guestunmount /mnt/windows
+```
+
+Verify:
+
+```bash
+mountpoint /mnt/windows
+```
+
+Only after it is no longer a mountpoint may the Windows VM be started again.
 
 ## 11. Feed the VM into the Inventor-on-Wine rebuild
 
@@ -807,16 +944,26 @@ virsh dumpxml inventor-win11 | grep -A8 '<disk type='
 
 If you switch to VirtIO storage later, Windows needs the VirtIO storage drivers during installation.
 
-### `guestmount` cannot inspect Windows
+### `guestmount` reports `Permission denied`
 
-The common causes are:
+If mounting through the libvirt/default backend reports:
 
-- VM is still running;
-- Windows hibernation/Fast Startup was left enabled;
-- C: is BitLocker/device encrypted;
-- Windows was hard-powered-off and NTFS is dirty.
+```text
+libguestfs: error: /var/lib/libvirt/images/inventor-win11.qcow2: Permission denied
+```
 
-Boot Windows, correct those conditions, perform a normal shutdown, then retry.
+use the documented `sudo env LIBGUESTFS_BACKEND=direct ...` workflow in section 10. Do not weaken the QCOW2 permissions with `chmod 777`.
+
+### `guestmount -i` says no operating system was found
+
+On Ubuntu 22.04, automatic libguestfs Windows 11 inspection can fail even when the VM boots normally. Use `virt-filesystems` to identify the NTFS Windows partition and mount it explicitly with `-m /dev/sdXN`. The tested VM used `/dev/sda3`.
+
+If no recognizable NTFS Windows partition is shown, then check the Windows-side conditions as well:
+
+- VM must be fully `shut off`;
+- run `powercfg /h off` in Administrator PowerShell before shutdown;
+- C: must not be BitLocker/device encrypted (`manage-bde -status C:`);
+- Windows must have been shut down normally rather than hard-powered-off.
 
 ### Inventor will not launch inside the VM because of graphics
 

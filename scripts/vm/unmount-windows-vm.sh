@@ -15,5 +15,7 @@ if ! mountpoint -q "$VM_MOUNT"; then
     exit 0
 fi
 
-guestunmount "$VM_MOUNT"
+# mount-windows-vm.sh mounts via sudo/direct libguestfs, so unmount with the
+# corresponding privilege level.
+sudo guestunmount "$VM_MOUNT"
 echo "Unmounted $VM_MOUNT. It is now safe to start the Windows VM."

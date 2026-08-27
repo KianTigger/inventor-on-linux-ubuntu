@@ -309,13 +309,59 @@ bash scripts/vm/setup-windows-vm-host.sh
 bash scripts/vm/create-windows-vm.sh
 ```
 
-Install Windows 11 + Inventor 2026 in the VM, disable hibernation and BitLocker/device encryption, shut the VM down, then:
+Install Windows 11 + Inventor 2026 in the VM, disable hibernation and BitLocker/device encryption, then shut the VM down completely.
+
+On Ubuntu 22.04, the packaged libguestfs stack may fail in two different ways when mounting a current Windows 11 QCOW2 image:
+
+1. the default/libvirt backend can report `Permission denied` while opening `/var/lib/libvirt/images/inventor-win11.qcow2`;
+2. after switching to the direct backend, automatic `guestmount -i` inspection can report `no operating system was found on this disk` even though Windows is installed correctly.
+
+The reliable fallback is to use libguestfs' **direct backend** and mount the Windows partition explicitly. First identify the partitions:
 
 ```bash
-bash scripts/vm/mount-windows-vm.sh
+sudo env LIBGUESTFS_BACKEND=direct \
+  virt-filesystems \
+    -a /var/lib/libvirt/images/inventor-win11.qcow2 \
+    --all --long -h
 ```
 
-This produces the expected `/mnt/windows/Windows`, `Program Files`, `ProgramData` and `Users` tree without copying the whole VM. The mount is read-only. **Do not start the VM while that mount is active.**
+For the documented VM created on Ubuntu 22.04, the Windows C: partition was `/dev/sda3`. Confirm it before mounting; do not assume the same partition number if you changed the VM layout.
+
+Prepare the FUSE mount once:
+
+```bash
+grep -qE '^[[:space:]]*user_allow_other' /etc/fuse.conf \
+  || echo 'user_allow_other' | sudo tee -a /etc/fuse.conf
+
+sudo mkdir -p /mnt/windows
+sudo chown "$USER":"$USER" /mnt/windows
+```
+
+Then mount the powered-off VM read-only:
+
+```bash
+sudo env LIBGUESTFS_BACKEND=direct \
+  guestmount \
+    -a /var/lib/libvirt/images/inventor-win11.qcow2 \
+    -m /dev/sda3 \
+    --ro \
+    -o allow_other \
+    -o uid="$(id -u)" \
+    -o gid="$(id -g)" \
+    /mnt/windows
+```
+
+Verify:
+
+```bash
+findmnt /mnt/windows
+ls -la /mnt/windows
+ls "/mnt/windows/Program Files/Autodesk/Inventor 2026"
+```
+
+The top-level tree should contain `Windows`, `Program Files`, `Program Files (x86)`, `ProgramData`, and `Users`. `findmnt` may display the outer FUSE transport as `rw`; the Windows filesystem inside libguestfs is still mounted read-only because `guestmount` was invoked with `--ro`.
+
+**Do not start the VM while `/mnt/windows` is mounted.** The detailed manual partition-discovery and troubleshooting sequence is in **[docs/windows-vm.md](docs/windows-vm.md)**.
 
 The complete installation/console/Windows-preparation/lifecycle instructions are in **[docs/windows-vm.md](docs/windows-vm.md)**. The documented default assumes an **Ubuntu/Linux workstation** and TigerVNC Viewer. Windows Setup is graphical, so a graphical VM console is required.
 
