@@ -111,15 +111,71 @@ echo "Licensing:      $ADSK_LICENSING_SOURCE_VERSION"
 echo "Shared comps:   $ADSK_COMPONENTS_SOURCE_VERSION"
 
 step "Stopping Wine and creating a clean 64-bit prefix"
+
 "$WINESERVER_BIN" -k >/dev/null 2>&1 || true
 sleep 2
 rm -rf "$WINEPREFIX"
-"$WINEBOOT_BIN" --init >/dev/null 2>&1
-sleep 3
+
+echo "Initializing Wine prefix..."
+
+if ! env \
+    -u DISPLAY \
+    -u WAYLAND_DISPLAY \
+    WINEPREFIX="$WINEPREFIX" \
+    WINEARCH=win64 \
+    "$WINEBOOT_BIN" --init; then
+    echo "ERROR: wineboot failed while creating the Wine prefix." >&2
+    exit 1
+fi
+
+echo "Waiting for Wine prefix initialization to become usable..."
+
+prefix_ready=0
+
+for attempt in $(seq 1 60); do
+    if [[ -s "$WINEPREFIX/system.reg" &&
+          -s "$WINEPREFIX/user.reg" &&
+          -s "$WINEPREFIX/userdef.reg" &&
+          -f "$WINEPREFIX/drive_c/windows/system32/cmd.exe" ]]; then
+
+        appdata="$(
+            timeout 10s env \
+                -u DISPLAY \
+                -u WAYLAND_DISPLAY \
+                WINEPREFIX="$WINEPREFIX" \
+                "$WINE_BIN" cmd /c 'echo %AppData%' \
+                2>/dev/null |
+                tr -d '\r' |
+                tail -n1
+        )" || true
+
+        if [[ -n "$appdata" && "$appdata" != '%AppData%' ]]; then
+            prefix_ready=1
+            echo "Wine prefix initialized successfully."
+            echo "AppData: $appdata"
+            break
+        fi
+    fi
+
+    echo "  Waiting... ($attempt/60)"
+    sleep 2
+done
+
+if (( ! prefix_ready )); then
+    echo "ERROR: Wine prefix initialization did not become ready within 120 seconds." >&2
+    exit 1
+fi
 
 step "Setting Windows 10 compatibility mode"
-PATH="$(dirname "$WINE_BIN"):$PATH" WINE="$WINE_BIN" WINESERVER="$WINESERVER_BIN" \
-    WINEPREFIX="$WINEPREFIX" winetricks -q win10
+
+env \
+    -u DISPLAY \
+    -u WAYLAND_DISPLAY \
+    PATH="$(dirname "$WINE_BIN"):$PATH" \
+    WINE="$WINE_BIN" \
+    WINESERVER="$WINESERVER_BIN" \
+    WINEPREFIX="$WINEPREFIX" \
+    winetricks -q win10
 
 step "Installing upstream DXVK $DXVK_VERSION"
 bash "$SCRIPT_DIR/install-dxvk-prefix.sh"
