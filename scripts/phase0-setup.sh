@@ -66,8 +66,15 @@ sudo wget -qO /etc/apt/sources.list.d/winehq-jammy.sources \
 sudo apt-get update
 
 echo "[4/7] Installing exactly Wine $WINE_VERSION..."
-wine_pkg_version="$(apt-cache madison winehq-devel 2>/dev/null \
-    | awk -v v="$WINE_VERSION" '$3 ~ ("^" v "(~|$)") {print $3; exit}')"
+wine_pkg_version="$(
+    apt-cache madison winehq-devel 2>/dev/null |
+        awk -v v="$WINE_VERSION" '
+            $3 ~ ("^" v "(~|$)") && !found {
+                print $3
+                found=1
+            }
+        '
+)"
 if [[ -z "$wine_pkg_version" ]]; then
     echo "ERROR: WineHQ's Jammy repository does not currently expose Wine $WINE_VERSION." >&2
     echo "       Check: apt-cache madison winehq-devel" >&2
