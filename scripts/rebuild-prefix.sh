@@ -176,25 +176,46 @@ if ! env \
     exit 1
 fi
 
-wine_windows_version="$(
+echo "Waiting for Wine to report the configured Windows version..."
+
+# A freshly initialized headless prefix can briefly return no output from
+# `winecfg /v` while Wine services are still settling. Retry the query instead
+# of treating the first empty response as a failed configuration.
+wine_windows_version=""
+
+for attempt in $(seq 1 12); do
+    wine_windows_version="$(
+        timeout 3s env \
+            -u DISPLAY \
+            -u WAYLAND_DISPLAY \
+            WINEPREFIX="$WINEPREFIX" \
+            "$WINE_BIN" winecfg /v \
+            2>/dev/null | \
+            tr -d '\r' | \
+            tail -n1
+    )" || true
+
+    if [[ "$wine_windows_version" == "win10" ]]; then
+        echo "Wine Windows version: $wine_windows_version"
+        break
+    fi
+
+    echo "  Waiting... ($attempt/12)"
+    sleep 2
+done
+
+if [[ "$wine_windows_version" != "win10" ]]; then
+    echo "ERROR: Wine Windows version verification did not become ready within about 60 seconds." >&2
+    echo "       Expected: win10" >&2
+    echo "       Found:    ${wine_windows_version:-<empty>}" >&2
+    echo "       Final winecfg diagnostic follows:" >&2
     timeout 10s env \
         -u DISPLAY \
         -u WAYLAND_DISPLAY \
         WINEPREFIX="$WINEPREFIX" \
-        "$WINE_BIN" winecfg /v \
-        2>/dev/null | \
-        tr -d '\r' | \
-        tail -n1
-)" || true
-
-if [[ "$wine_windows_version" != "win10" ]]; then
-    echo "ERROR: Wine Windows version verification failed." >&2
-    echo "       Expected: win10" >&2
-    echo "       Found:    ${wine_windows_version:-<empty>}" >&2
+        "$WINE_BIN" winecfg /v || true
     exit 1
 fi
-
-echo "Wine Windows version: $wine_windows_version"
 
 step "Installing upstream DXVK $DXVK_VERSION"
 bash "$SCRIPT_DIR/install-dxvk-prefix.sh"
