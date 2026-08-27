@@ -81,8 +81,13 @@ if [[ -z "$wine_pkg_version" ]]; then
     echo "       Do not silently substitute a newer Wine version; the wbemprox patch is tied to 11.4." >&2
     exit 1
 fi
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --install-recommends \
-    "winehq-devel=$wine_pkg_version"
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    --install-recommends \
+    --allow-downgrades \
+    "winehq-devel=$wine_pkg_version" \
+    "wine-devel=$wine_pkg_version" \
+    "wine-devel-amd64=$wine_pkg_version" \
+    "wine-devel-i386:i386=$wine_pkg_version"
 
 if [[ ! -x /opt/wine-devel/bin/wine ]]; then
     echo "ERROR: WineHQ devel installed, but /opt/wine-devel/bin/wine is missing." >&2
