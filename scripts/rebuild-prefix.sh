@@ -178,20 +178,23 @@ fi
 
 echo "Waiting for Wine to report the configured Windows version..."
 
-# A freshly initialized headless prefix can briefly return no output from
-# `winecfg /v` while Wine services are still settling. Retry the query instead
-# of treating the first empty response as a failed configuration.
+# winecfg prints its /v result through Wine's MESSAGE/debug output path, which
+# is written to stderr. Capture both streams, suppress normal Wine diagnostics,
+# and extract only the exact Windows-version result. A freshly initialized
+# headless prefix can also take a few seconds to settle, so retry the query.
 wine_windows_version=""
 
-for attempt in $(seq 1 12); do
+for attempt in $(seq 1 6); do
     wine_windows_version="$(
-        timeout 3s env \
+        timeout 20s env \
             -u DISPLAY \
             -u WAYLAND_DISPLAY \
+            WINEDEBUG=-all \
             WINEPREFIX="$WINEPREFIX" \
             "$WINE_BIN" winecfg /v \
-            2>/dev/null | \
+            2>&1 | \
             tr -d '\r' | \
+            grep -x 'win10' | \
             tail -n1
     )" || true
 
@@ -200,12 +203,12 @@ for attempt in $(seq 1 12); do
         break
     fi
 
-    echo "  Waiting... ($attempt/12)"
+    echo "  Waiting... ($attempt/6)"
     sleep 2
 done
 
 if [[ "$wine_windows_version" != "win10" ]]; then
-    echo "ERROR: Wine Windows version verification did not become ready within about 60 seconds." >&2
+    echo "ERROR: Wine Windows version verification did not become ready after 6 attempts." >&2
     echo "       Expected: win10" >&2
     echo "       Found:    ${wine_windows_version:-<empty>}" >&2
     echo "       Final winecfg diagnostic follows:" >&2
