@@ -12,7 +12,8 @@ CONFIG_FILE="${INVENTOR_CONFIG:-$PROJECT_DIR/inventor.env}"
 : "${WINEPREFIX:=$HOME/.wine-inventor2026}"
 : "${WINE_VERSION:=11.4}"
 : "${DXVK_VERSION:=2.7.1}"
-: "${ADSK_LICENSING_VERSION:=15.4.2.4}"
+: "${ADSK_IDENTITY_VERSION:=auto}"
+: "${ADSK_LICENSING_VERSION:=auto}"
 : "${DATA_DRIVE:=}"
 : "${DXVK_FILTER_DEVICE_UUID:=}"
 : "${INVENTOR_DISPLAY:=}"
@@ -47,6 +48,45 @@ else
     WINEPATH_BIN="${WINEPATH_BIN:-$(command -v winepath 2>/dev/null || true)}"
     WINECFG_BIN="${WINECFG_BIN:-$(command -v winecfg 2>/dev/null || true)}"
 fi
+
+
+# Resolve a versioned Autodesk component directory from the offline Windows tree.
+# The Windows VM mount exposes NTFS junctions such as "Current" as /sysroot/...
+# symlinks, which are intentionally ignored here. We select real numeric version
+# directories instead. Set the corresponding inventor.env value to a specific
+# version to override auto-detection.
+detect_versioned_component() {
+    local base="$1"
+    local requested="${2:-auto}"
+    local version
+
+    if [[ -n "$requested" && "$requested" != "auto" ]]; then
+        [[ -d "$base/$requested" ]] || return 1
+        printf '%s\n' "$requested"
+        return 0
+    fi
+
+    version="$(
+        find "$base" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null \
+            | grep -E '^[0-9]+(\.[0-9]+)+$' \
+            | sort -V \
+            | tail -n 1
+    )"
+    [[ -n "$version" ]] || return 1
+    printf '%s\n' "$version"
+}
+
+detect_adsk_identity_version() {
+    detect_versioned_component \
+        "$WINDOWS_MOUNT/Program Files/Autodesk/AdskIdentityManager" \
+        "${ADSK_IDENTITY_VERSION:-auto}"
+}
+
+detect_adsk_licensing_version() {
+    detect_versioned_component \
+        "$WINDOWS_MOUNT/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing" \
+        "${ADSK_LICENSING_VERSION:-auto}"
+}
 
 require_command() {
     local cmd="$1"

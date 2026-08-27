@@ -42,7 +42,8 @@ A server without a monitor can still be usable, but Inventor is a GUI Windows ap
 | Wine | **11.4** vanilla WineHQ devel |
 | DXVK | **2.7.1** |
 | Inventor | **2026 Professional** |
-| Autodesk Licensing | **15.4.2.4** by default |
+| Autodesk Identity Manager | auto-detected from the mounted Windows installation |
+| Autodesk Licensing | auto-detected from the mounted Windows installation |
 | Windows compatibility mode | Windows 10 |
 
 Do not casually upgrade Wine or DXVK while debugging. The included `wbemprox` patch is built against Wine 11.4 and the OGS binary patch is tied to the tested Inventor binary layout.
@@ -66,9 +67,9 @@ Required source locations include:
 ```text
 Windows/System32
 Program Files/Autodesk/Inventor 2026
-Program Files/Autodesk/AdskIdentityManager/Current
+Program Files/Autodesk/AdskIdentityManager/<version>
 Program Files/Common Files/Autodesk Shared
-Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/15.4.2.4
+Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/<version>
 ProgramData/Autodesk
 Users/<windows-user>/NTUSER.DAT
 ```
@@ -175,6 +176,8 @@ The script verifies Ubuntu 22.04/x86_64/kernel 6+, enables the `i386` architectu
 - Wine build dependencies used by the `wbemprox` patch
 
 It then configures the official WineHQ Jammy repository and searches that repository for **exactly Wine 11.4**. It will stop instead of silently installing a newer release if 11.4 is unavailable.
+
+Because WineHQ publishes `winehq-devel` as a meta-package, Phase 0 pins **all four WineHQ packages** (`winehq-devel`, `wine-devel`, `wine-devel-amd64`, and `wine-devel-i386:i386`) to the same 11.4 Jammy version and allows the required downgrade. Pinning only the meta-package can fail with an unmet `wine-devel (= 11.4~jammy-1)` dependency.
 
 WineHQ's `winehq-devel` package installs the development branch under `/opt/wine-devel`. All repository scripts prefer that path so another system Wine installation does not accidentally get used.
 
@@ -410,7 +413,7 @@ Before rebuilding, verify:
 bash scripts/doctor.sh
 ```
 
-The doctor checks the expected Inventor, Identity Manager and Licensing Service source directories.
+The doctor checks Inventor and auto-detects the real numeric Identity Manager and Licensing Service version directories. It intentionally does not rely on the Windows `Current` junctions because libguestfs/guestmount exposes those junctions as `/sysroot/...` symlinks on Ubuntu.
 
 ---
 
@@ -650,15 +653,18 @@ The rebuild writes its Wine installer output to a WebView2 installation log. Re-
 
 Your `OGSFactory.dll` does not match the tested binary. This is a deliberate safety failure. Restore/use the exact compatible Inventor 2026 build or re-derive the offsets for your binary.
 
-### Autodesk Licensing version differs
+### Autodesk Identity Manager or Licensing version differs
 
-The tested/default version is:
+Fresh Autodesk installations can contain newer component versions than the original proof-of-concept. The Ubuntu port now auto-detects the newest real numeric version directory from the mounted Windows installation:
 
 ```bash
-ADSK_LICENSING_VERSION="15.4.2.4"
+ADSK_IDENTITY_VERSION="auto"
+ADSK_LICENSING_VERSION="auto"
 ```
 
-If the Windows installation has another version, changing the variable may be necessary, but the SSO/licensing compatibility workflow should then be treated as untested.
+For the staging VM used during this port, Identity Manager was `1.19.2.0` and Autodesk Licensing was `16.5.0.16154`. You may pin a specific version explicitly if multiple numeric directories are present.
+
+Do not copy the mounted Windows `Current` links directly. With the libguestfs mount used on Ubuntu 22.04 they appear as absolute `/sysroot/...` symlinks. `rebuild-prefix.sh` copies the resolved numeric directory and recreates `Current` as a real directory inside the Wine prefix.
 
 ### Full host report
 

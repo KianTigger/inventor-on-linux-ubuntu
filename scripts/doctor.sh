@@ -46,8 +46,20 @@ fi
 if [[ -d "$WINDOWS_MOUNT/Windows" ]]; then
     ok "Windows source mounted: $WINDOWS_MOUNT"
     [[ -d "$WINDOWS_MOUNT/Program Files/Autodesk/Inventor 2026" ]] && ok "Inventor 2026 source found" || fail "Inventor 2026 not found under Windows Program Files"
-    [[ -d "$WINDOWS_MOUNT/Program Files/Autodesk/AdskIdentityManager/Current" ]] && ok "Autodesk Identity Manager source found" || fail "Identity Manager Current directory missing"
-    [[ -d "$WINDOWS_MOUNT/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/$ADSK_LICENSING_VERSION" ]] && ok "Autodesk Licensing $ADSK_LICENSING_VERSION source found" || fail "Expected Autodesk Licensing $ADSK_LICENSING_VERSION source missing"
+
+    identity_version="$(detect_adsk_identity_version 2>/dev/null || true)"
+    if [[ -n "$identity_version" ]]; then
+        ok "Autodesk Identity Manager $identity_version source found"
+    else
+        fail "Autodesk Identity Manager version directory not found (configured: ${ADSK_IDENTITY_VERSION:-auto})"
+    fi
+
+    licensing_version="$(detect_adsk_licensing_version 2>/dev/null || true)"
+    if [[ -n "$licensing_version" ]]; then
+        ok "Autodesk Licensing $licensing_version source found"
+    else
+        fail "Autodesk Licensing version directory not found (configured: ${ADSK_LICENSING_VERSION:-auto})"
+    fi
 else
     fail "Windows source is not mounted at $WINDOWS_MOUNT (Linux-only server: see docs/windows-vm.md)"
 fi

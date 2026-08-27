@@ -756,6 +756,18 @@ ls "/mnt/windows/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"
 
 The tested source showed the expected Inventor directory plus Autodesk Identity Manager under `Program Files/Autodesk`.
 
+### Autodesk `Current` junctions on the offline guestmount
+
+On Ubuntu 22.04, libguestfs exposes NTFS junctions such as Autodesk's `Current` entries as absolute `/sysroot/...` symlinks. For example, the staging VM used here exposed Identity Manager `Current` as a link to `/sysroot/Program Files/Autodesk/AdskIdentityManager/1.19.2.0`, and Autodesk Licensing `Current` similarly pointed at its numeric version directory. Those links are valid inside libguestfs but are broken when followed directly from the Ubuntu host.
+
+The Linux scripts therefore ignore `Current` when reading the offline VM. They auto-detect real numeric version directories (`1.19.2.0`, `16.5.0.16154`, etc.), copy those directories, and recreate `Current` as a normal directory inside the Wine prefix. Keep these settings on automatic detection unless you intentionally need a particular installed version:
+
+```bash
+ADSK_IDENTITY_VERSION="auto"
+ADSK_LICENSING_VERSION="auto"
+```
+
+
 > **Why does `findmnt` show `rw`?**
 >
 > `findmnt` reports the outer FUSE mount options, and on this Ubuntu setup it may display `rw`. The guest filesystem inside libguestfs is nevertheless mounted read-only because `guestmount` was invoked with `--ro`. Keep `--ro` in every offline Windows mount command.

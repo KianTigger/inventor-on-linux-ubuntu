@@ -22,6 +22,23 @@ if [[ $EUID -eq 0 ]]; then
     exit 1
 fi
 
+ADSK_IDENTITY_SOURCE_VERSION="$(detect_adsk_identity_version 2>/dev/null || true)"
+if [[ -z "$ADSK_IDENTITY_SOURCE_VERSION" ]]; then
+    echo "ERROR: Could not resolve Autodesk Identity Manager under the Windows source." >&2
+    echo "       Configured ADSK_IDENTITY_VERSION=${ADSK_IDENTITY_VERSION:-auto}" >&2
+    exit 1
+fi
+
+ADSK_LICENSING_SOURCE_VERSION="$(detect_adsk_licensing_version 2>/dev/null || true)"
+if [[ -z "$ADSK_LICENSING_SOURCE_VERSION" ]]; then
+    echo "ERROR: Could not resolve Autodesk Licensing under the Windows source." >&2
+    echo "       Configured ADSK_LICENSING_VERSION=${ADSK_LICENSING_VERSION:-auto}" >&2
+    exit 1
+fi
+
+IDENTITY_SOURCE="$WINDOWS_MOUNT/Program Files/Autodesk/AdskIdentityManager/$ADSK_IDENTITY_SOURCE_VERSION"
+LICENSING_SOURCE="$WINDOWS_MOUNT/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/$ADSK_LICENSING_SOURCE_VERSION"
+
 # Preflight source tree before deleting an existing prefix.
 required_paths=(
     "$WINDOWS_MOUNT/Windows/System32"
@@ -30,8 +47,8 @@ required_paths=(
     "$WINDOWS_MOUNT/Program Files/Autodesk/Inventor 2026/Preferences"
     "$WINDOWS_MOUNT/Program Files/Common Files/Autodesk Shared/Components/2026/1.8.0"
     "$WINDOWS_MOUNT/Program Files/Common Files/Autodesk Shared/RealDWG Shared 2026"
-    "$WINDOWS_MOUNT/Program Files/Autodesk/AdskIdentityManager/Current"
-    "$WINDOWS_MOUNT/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/$ADSK_LICENSING_VERSION"
+    "$IDENTITY_SOURCE"
+    "$LICENSING_SOURCE"
 )
 for path in "${required_paths[@]}"; do
     if [[ ! -e "$path" ]]; then
@@ -81,6 +98,8 @@ echo "Wine:          $($WINE_BIN --version)"
 echo "Windows source: $WINDOWS_MOUNT"
 echo "Windows user:   $WIN_USER"
 echo "Wine prefix:    $WINEPREFIX"
+echo "Identity Mgr:   $ADSK_IDENTITY_SOURCE_VERSION"
+echo "Licensing:      $ADSK_LICENSING_SOURCE_VERSION"
 
 step "Stopping Wine and creating a clean 64-bit prefix"
 "$WINESERVER_BIN" -k >/dev/null 2>&1 || true
@@ -141,21 +160,29 @@ step "Starting Microsoft WebView2 Runtime installer"
 WEBVIEW_PID=$!
 sleep 10
 
-step "Copying Autodesk Identity Manager"
-mkdir -p "$WINEPREFIX/drive_c/Program Files/Autodesk/AdskIdentityManager"
-cp -a "$WINDOWS_MOUNT/Program Files/Autodesk/AdskIdentityManager/Current" \
-    "$WINEPREFIX/drive_c/Program Files/Autodesk/AdskIdentityManager/"
-# Tested Autodesk components look for these compatibility-version directories.
+step "Copying Autodesk Identity Manager $ADSK_IDENTITY_SOURCE_VERSION"
+IDMGR_ROOT="$WINEPREFIX/drive_c/Program Files/Autodesk/AdskIdentityManager"
+mkdir -p "$IDMGR_ROOT"
+rm -rf "$IDMGR_ROOT/$ADSK_IDENTITY_SOURCE_VERSION" "$IDMGR_ROOT/Current"
+cp -a "$IDENTITY_SOURCE" "$IDMGR_ROOT/$ADSK_IDENTITY_SOURCE_VERSION"
+# Do not copy the offline Windows `Current` junction: guestmount exposes it as
+# an absolute /sysroot/... symlink. Create a real Current directory instead.
+cp -a "$IDENTITY_SOURCE" "$IDMGR_ROOT/Current"
+# Tested Autodesk components also probe these compatibility-version directories.
 for version in 1.16.5.1 1.14.0.3; do
-    rm -rf "$WINEPREFIX/drive_c/Program Files/Autodesk/AdskIdentityManager/$version"
-    cp -a "$WINEPREFIX/drive_c/Program Files/Autodesk/AdskIdentityManager/Current" \
-        "$WINEPREFIX/drive_c/Program Files/Autodesk/AdskIdentityManager/$version"
+    [[ "$version" == "$ADSK_IDENTITY_SOURCE_VERSION" ]] && continue
+    rm -rf "$IDMGR_ROOT/$version"
+    cp -a "$IDENTITY_SOURCE" "$IDMGR_ROOT/$version"
 done
 
-step "Copying Autodesk Licensing Service $ADSK_LICENSING_VERSION"
-mkdir -p "$WINEPREFIX/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"
-cp -a "$WINDOWS_MOUNT/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/$ADSK_LICENSING_VERSION" \
-    "$WINEPREFIX/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/"
+step "Copying Autodesk Licensing Service $ADSK_LICENSING_SOURCE_VERSION"
+LICENSING_ROOT="$WINEPREFIX/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing"
+mkdir -p "$LICENSING_ROOT"
+rm -rf "$LICENSING_ROOT/$ADSK_LICENSING_SOURCE_VERSION" "$LICENSING_ROOT/Current"
+cp -a "$LICENSING_SOURCE" "$LICENSING_ROOT/$ADSK_LICENSING_SOURCE_VERSION"
+# Recreate Current as a real directory so the guestmount /sysroot junction is not
+# propagated into the Wine prefix.
+cp -a "$LICENSING_SOURCE" "$LICENSING_ROOT/Current"
 
 step "Copying Autodesk license/cache files when available"
 mkdir -p "$WINEPREFIX/drive_c/ProgramData/Autodesk/Adlm/ASR" \
@@ -192,8 +219,8 @@ step "Applying Autodesk Shared Components registry keys"
 "$WINE_BIN" reg add 'HKLM\SOFTWARE\Autodesk\SharedComponents\2026' /v Version /t REG_EXPAND_SZ /d 1.8.0 /f >/dev/null
 
 step "Applying Autodesk licensing/Identity Manager registry keys"
-"$WINE_BIN" reg add 'HKLM\SOFTWARE\Autodesk\AdskLicensing' /v Version /t REG_EXPAND_SZ /d "$ADSK_LICENSING_VERSION" /f >/dev/null
-for version in 1.16.5.1 1.14.0.3; do
+"$WINE_BIN" reg add 'HKLM\SOFTWARE\Autodesk\AdskLicensing' /v Version /t REG_EXPAND_SZ /d "$ADSK_LICENSING_SOURCE_VERSION" /f >/dev/null
+for version in "$ADSK_IDENTITY_SOURCE_VERSION" 1.16.5.1 1.14.0.3; do
     "$WINE_BIN" reg add "HKLM\\SOFTWARE\\Autodesk\\AdskIdentityManager\\$version" /v Location /t REG_EXPAND_SZ \
         /d "C:\\Program Files\\Autodesk\\AdskIdentityManager\\$version" /f >/dev/null
 done
@@ -209,7 +236,7 @@ step "Setting Wine Windows PATH"
     /d 'C:\windows\system32;C:\windows;C:\windows\system32\wbem;C:\Program Files\Common Files\Autodesk Shared\Components\2026\1.8.0;C:\Program Files\Autodesk\Inventor 2026\Bin' /f >/dev/null
 
 step "Installing IDSDK SSO plugin into the Licensing Agent"
-AGENTDIR="$WINEPREFIX/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/$ADSK_LICENSING_VERSION/AdskLicensingAgent"
+AGENTDIR="$WINEPREFIX/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/$ADSK_LICENSING_SOURCE_VERSION/AdskLicensingAgent"
 IDMGRDIR="$WINEPREFIX/drive_c/Program Files/Autodesk/AdskIdentityManager/Current"
 mkdir -p "$AGENTDIR/SSOPlugin/Current"
 cp "$IDMGRDIR/SSOPlugin/Current/"*.dll "$AGENTDIR/SSOPlugin/Current/"
