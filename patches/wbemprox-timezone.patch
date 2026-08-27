@@ -1,5 +1,5 @@
---- /tmp/builtin.c.orig	2026-03-21 12:21:58.126709793 +1100
-+++ /tmp/wine-11.4/dlls/wbemprox/builtin.c	2026-03-21 01:39:24.731297869 +1100
+--- a/dlls/wbemprox/builtin.c
++++ b/dlls/wbemprox/builtin.c
 @@ -547,6 +547,30 @@
      { L"GetLastRestoreStatus", CIM_FLAG_ARRAY|COL_FLAG_METHOD },
      { L"Restore",              CIM_FLAG_ARRAY|COL_FLAG_METHOD },
