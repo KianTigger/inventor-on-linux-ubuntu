@@ -199,23 +199,251 @@ virsh dominfo inventor-win11
 
 ---
 
-## 5. Connect to the VM console securely
+## 5. Open the VM's graphical console
 
-The default VNC port is `5905`, but it is intentionally listening only on the server's loopback interface. Do not open TCP 5905 in UFW or your external firewall.
+Windows Setup is graphical. A plain SSH shell cannot display the Windows installer, so you need a graphical console for the VM during Windows installation and initial Autodesk setup. **VNC is one way to provide that console; it is not a separate Windows requirement and it is not the only option.**
 
-From the computer where you want to view the Windows installer, create an SSH tunnel:
+### What is a VNC client?
+
+VNC (Virtual Network Computing) is a protocol for viewing and controlling a graphical desktop remotely. In this repository, QEMU exposes the VM's virtual monitor, keyboard, and mouse through a VNC server. A **VNC client/viewer** is the application that displays that virtual monitor and sends your keyboard/mouse input back to the VM.
+
+The VM's VNC server is deliberately bound to `127.0.0.1` on `AI-Server`, so TCP port 5905 is not exposed to the LAN or Internet. Do not open TCP 5905 in UFW or an external firewall.
+
+You have two supported ways to access the console.
+
+### Option A — Ubuntu/Linux workstation with TigerVNC (recommended)
+
+These instructions assume the computer you are sitting at is also Ubuntu/Linux. The VM itself runs on `AI-Server`; TigerVNC runs on your workstation and only displays the VM console.
+
+#### Step A1 — Install TigerVNC Viewer on your Ubuntu/Linux workstation
+
+Open a terminal on your **workstation**, not in the SSH session on `AI-Server`:
 
 ```bash
-ssh -N -L 5905:127.0.0.1:5905 ai4@AI-Server
+sudo apt update
+sudo apt install -y tigervnc-viewer
 ```
 
-Keep that SSH process running. Then open any VNC viewer on the same client computer and connect to:
+Confirm the viewer is installed:
+
+```bash
+command -v vncviewer
+vncviewer --version
+```
+
+`command -v` should print a path such as `/usr/bin/vncviewer`.
+
+> `tigervnc-viewer` installs only the viewer/client. You do not need to install a separate VNC server on the workstation or on Windows. QEMU/libvirt already provides the VM-side VNC server.
+
+#### Step A2 — Confirm the Windows VM is running
+
+In a normal SSH session to `AI-Server`:
+
+```bash
+virsh domstate inventor-win11
+virsh domdisplay inventor-win11
+```
+
+Expected state:
 
 ```text
-127.0.0.1:5905
+running
 ```
 
-If you changed `VM_VNC_PORT`, use that port on both sides of the tunnel.
+The display should be similar to:
+
+```text
+vnc://127.0.0.1:5905
+```
+
+If the VM is shut off, start it:
+
+```bash
+bash scripts/vm/start-windows-vm.sh
+```
+
+#### Step A3 — Create the SSH tunnel from the workstation
+
+Open a **second terminal on your Ubuntu/Linux workstation** and run:
+
+```bash
+ssh -N -L 5905:127.0.0.1:5905 ai4@SERVER_IP
+```
+
+For the current `AI-Server` deployment:
+
+```bash
+ssh -N -L 5905:127.0.0.1:5905 ai4@192.168.101.172
+```
+
+Enter the SSH password/key credentials when prompted. After login, the command normally prints nothing and appears to sit idle. **That is expected. Leave this terminal open for as long as you are using VNC.**
+
+`-L 5905:127.0.0.1:5905` means:
+
+```text
+workstation 127.0.0.1:5905
+             |
+             | encrypted SSH tunnel
+             v
+AI-Server    127.0.0.1:5905
+             |
+             v
+inventor-win11 VNC console
+```
+
+Do not open TCP 5905 in UFW/router/firewall rules. The VNC service is intentionally localhost-only and is reached through SSH.
+
+#### Step A4 — Open TigerVNC Viewer
+
+With the SSH tunnel still running, open another workstation terminal and run:
+
+```bash
+vncviewer 127.0.0.1::5905
+```
+
+The **double colon** is intentional for TigerVNC: it means `5905` is the literal TCP port.
+
+You can also launch `TigerVNC Viewer` from the Ubuntu application menu. If using the graphical connection dialog, enter:
+
+```text
+127.0.0.1::5905
+```
+
+If TigerVNC shows a warning that the VNC transport itself is unencrypted, remember that the connection is already inside the encrypted SSH tunnel. Do not bypass the tunnel by connecting directly to the server's LAN address on port 5905.
+
+#### Step A5 — Understand the first screen
+
+On first boot you may see the **OVMF/UEFI firmware menu**, which looks like a BIOS setup screen and contains entries such as:
+
+```text
+Select Language
+Device Manager
+Boot Manager
+Boot Maintenance Manager
+Continue
+Reset
+```
+
+This is **not Windows Setup**. `Shift+F10` and Windows installer shortcuts do not work here. If choosing `Continue` returns to the same page, the firmware has not selected a bootable device.
+
+Use the keyboard in the TigerVNC window:
+
+1. Click inside the VNC window so it has keyboard focus.
+2. Use the arrow keys to highlight **Boot Manager**.
+3. Press **Enter**.
+4. Select the entry corresponding to the virtual DVD/CD-ROM containing the Windows ISO. It is typically named similar to `UEFI QEMU DVD-ROM`, `UEFI QEMU CD-ROM`, or another QEMU optical-drive entry.
+5. Press **Enter**.
+6. If `Press any key to boot from CD or DVD...` appears, immediately press **Space** or **Enter**.
+
+After this, the real graphical Windows installer should appear.
+
+If Boot Manager does not contain a DVD/CD-ROM entry, do not recreate the VM immediately. On `AI-Server`, verify the ISO attachment:
+
+```bash
+virsh domblklist inventor-win11 --details
+virsh dumpxml inventor-win11 | grep -A15 -B2 "device='cdrom'"
+```
+
+You should see both the 160 GiB VM disk and a `cdrom` source pointing to the copied Windows ISO.
+
+#### Step A6 — Keep the tunnel open while using the VM
+
+The three relevant terminals/windows are normally:
+
+```text
+Workstation terminal 1: ssh -N -L ...        <- leave running
+Workstation terminal 2: vncviewer ...        <- can be closed/reopened
+AI-Server SSH shell:    virsh/scripts         <- VM administration
+```
+
+Closing `vncviewer` does **not** stop the VM. Closing the SSH tunnel disconnects the VNC viewer, but also does **not** stop the VM. You can recreate the tunnel and reconnect later.
+
+#### Step A7 — Reconnect if TigerVNC closes during a Windows reboot
+
+Windows Setup reboots the VM several times. During a reboot, TigerVNC can exit and print something similar to:
+
+```text
+CConn: End of stream
+```
+
+This normally means that the VM-side VNC connection disappeared while QEMU/OVMF reset the guest display. **It does not by itself mean that Windows Setup failed.** The VM continues independently of the viewer.
+
+On `AI-Server`, check the VM state:
+
+```bash
+virsh domstate inventor-win11
+virsh domdisplay inventor-win11
+```
+
+If the VM reports `running`, leave it running. If it reports `shut off` during a point where Windows should still be installing, start it again:
+
+```bash
+bash scripts/vm/start-windows-vm.sh
+```
+
+On the Ubuntu/Linux workstation, make sure the SSH tunnel is still running:
+
+```bash
+ssh -N -L 5905:127.0.0.1:5905 ai4@192.168.101.172
+```
+
+If that command has exited, start it again and leave the terminal open. Then reconnect the viewer from another workstation terminal:
+
+```bash
+vncviewer 127.0.0.1::5905
+```
+
+After reconnecting:
+
+- if Windows Setup, `Getting ready`, OOBE, or the Windows desktop appears, continue normally;
+- if `Press any key to boot from CD or DVD...` appears **after Windows has already copied files to the virtual disk**, do **not** press a key; let it boot from disk;
+- if the OVMF firmware menu appears after the first installer phase, choose **Boot Manager -> Windows Boot Manager** (or the virtual hard disk), not the Windows DVD/CD-ROM;
+- only choose the DVD/CD-ROM again when you intentionally want to restart the installation from the ISO.
+
+If `vncviewer` reports `Connection refused`, collect the server-side state before changing the VM:
+
+```bash
+virsh domstate inventor-win11
+virsh domdisplay inventor-win11
+virsh list --all
+sudo tail -n 50 /var/log/libvirt/qemu/inventor-win11.log
+```
+
+If you changed `VM_VNC_PORT` in `windows-vm.env`, replace `5905` in the SSH and `vncviewer` commands with that value.
+
+### Option B — Do the graphical work directly on AI-Server
+
+If you can physically use `AI-Server`'s GNOME desktop, or already have a graphical remote-desktop session into that GNOME desktop, you do **not** need the SSH tunnel or a VNC client on another computer.
+
+Install a libvirt graphical viewer if needed:
+
+```bash
+sudo apt update
+sudo apt install -y virt-viewer
+```
+
+Open a Terminal **inside the graphical GNOME session** and run:
+
+```bash
+virt-viewer --connect qemu:///system inventor-win11
+```
+
+This opens the VM console directly on the server desktop.
+
+Alternatively, if you prefer the full graphical VM manager:
+
+```bash
+sudo apt install -y virt-manager
+virt-manager --connect qemu:///system
+```
+
+Select `inventor-win11` and open its console.
+
+> Important: running `virt-viewer` from a normal SSH shell where `DISPLAY` is unset will not create a visible window. In that case use Option A, use SSH X11 forwarding, or connect to the server's graphical desktop first.
+
+### Is the graphical console needed after Windows is prepared?
+
+Not for the normal Linux rebuild. It is needed to install Windows, install Inventor, complete Autodesk sign-in/licensing, and perform any later interactive Windows maintenance. Once Windows has been prepared and shut down, Linux mounts the VM disk read-only and the Wine rebuild proceeds from the shell.
 
 ### If you miss "Press any key to boot from CD/DVD"
 
@@ -243,7 +471,29 @@ The VM is already configured with the major Windows 11 virtualization requiremen
 
 The virtual disk is SATA and the NIC is `e1000e`, specifically to avoid requiring extra VirtIO drivers during Setup.
 
-After installation:
+### Windows 11 Pro: create a local account without a personal Microsoft account
+
+For this staging VM, **Windows 11 Pro** is recommended. The Windows login and Autodesk login serve different purposes: you can use a local Windows account while later signing into Autodesk separately for Inventor licensing/SSO.
+
+During the Windows out-of-box experience (OOBE), if you want to avoid a personal Microsoft account:
+
+1. When Windows asks how you want to set up the device, choose **Set up for work or school** rather than **Set up for personal use**.
+2. At the organization/account sign-in screen, select **Sign-in options**.
+3. Select **Domain join instead** when that option is offered.
+4. Windows should open the local-user creation flow.
+5. Create a local account, for example `inventor`, and choose an appropriate password.
+6. Continue OOBE normally. You do **not** need to join an Active Directory domain merely because you used the `Domain join instead` path.
+
+The exact wording of OOBE changes between Windows releases. This repository deliberately does not depend on undocumented `OOBE\BYPASSNRO`-style commands. If `Set up for work or school`, `Sign-in options`, or `Domain join instead` is not offered on your current **Windows 11 Pro** media, stop before entering a personal Microsoft account and confirm the edition/build and available options.
+
+Do not confuse the accounts:
+
+```text
+Windows VM login    -> local Windows account (for example: inventor)
+Autodesk Inventor   -> Autodesk account/SSO required for Autodesk licensing
+```
+
+After installation and OOBE:
 
 1. let Windows Update finish;
 2. install a browser if needed;

@@ -317,7 +317,46 @@ bash scripts/vm/mount-windows-vm.sh
 
 This produces the expected `/mnt/windows/Windows`, `Program Files`, `ProgramData` and `Users` tree without copying the whole VM. The mount is read-only. **Do not start the VM while that mount is active.**
 
-The complete installation/console/Windows-preparation/lifecycle instructions are in **[docs/windows-vm.md](docs/windows-vm.md)**.
+The complete installation/console/Windows-preparation/lifecycle instructions are in **[docs/windows-vm.md](docs/windows-vm.md)**. The documented default assumes an **Ubuntu/Linux workstation** and TigerVNC Viewer. Windows Setup is graphical, so a graphical VM console is required.
+
+On the Ubuntu/Linux workstation where you will view the VM:
+
+```bash
+sudo apt update
+sudo apt install -y tigervnc-viewer
+```
+
+Create the SSH tunnel from that workstation:
+
+```bash
+ssh -N -L 5905:127.0.0.1:5905 ai4@SERVER_IP
+```
+
+For the current `AI-Server` address:
+
+```bash
+ssh -N -L 5905:127.0.0.1:5905 ai4@192.168.101.172
+```
+
+Leave that SSH command running, then open another workstation terminal:
+
+```bash
+vncviewer 127.0.0.1::5905
+```
+
+The double colon tells TigerVNC that `5905` is the literal TCP port. On first boot, if the VNC window shows the grey OVMF/UEFI screen with `Select Language`, `Device Manager`, and `Boot Manager`, that is **firmware, not Windows Setup**. Choose **Boot Manager**, then select the QEMU DVD/CD-ROM containing the Windows ISO and press a key when prompted to boot from it.
+
+During Windows installation the VM reboots several times. TigerVNC may close with an `End of stream` message while QEMU/firmware resets the display. **That does not mean the Windows installation failed.** Keep or recreate the SSH tunnel, confirm the VM is running with `virsh domstate inventor-win11`, and reconnect with:
+
+```bash
+vncviewer 127.0.0.1::5905
+```
+
+After Windows has copied files to the virtual disk, do **not** press a key at later `Press any key to boot from CD or DVD...` prompts. Let the VM boot from the virtual disk. If OVMF appears again, use **Boot Manager -> Windows Boot Manager** rather than the DVD/CD-ROM entry.
+
+For Windows account setup, install **Windows 11 Pro**. If you want to avoid a personal Microsoft account during OOBE, choose **Set up for work or school**, then **Sign-in options -> Domain join instead** when those options are offered. This opens local-user creation; the VM does not actually need to join a domain. A local account such as `inventor` is appropriate for this staging VM. Autodesk sign-in is separate and is still required later for Autodesk licensing/SSO. See the detailed VM guide for the full sequence and current-version caveats.
+
+The alternative is to use `virt-viewer` directly from `AI-Server`'s local GNOME desktop; see the detailed VM guide.
 
 Before rebuilding, verify:
 
