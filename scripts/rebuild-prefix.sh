@@ -186,7 +186,7 @@ wine_windows_version=""
 
 for attempt in $(seq 1 6); do
     wine_windows_version="$(
-        timeout 20s env \
+        timeout 10s env \
             -u DISPLAY \
             -u WAYLAND_DISPLAY \
             WINEDEBUG=-all \
@@ -412,15 +412,22 @@ step "Copying Textures"
 [[ -d "$WINDOWS_MOUNT/Users/Public/Documents/Autodesk/Inventor 2026/Textures" ]] && \
     cp -a "$WINDOWS_MOUNT/Users/Public/Documents/Autodesk/Inventor 2026/Textures" "$PUBLIC_INV/" || echo "  NOTE: Textures not found"
 
-step "Applying the tested OGSFactory.dll null-pointer patch"
+step "Handling the build-specific OGSFactory.dll null-pointer patch"
 OGSDLL="$DEST/Bin/OGSFactory.dll"
 if [[ ! -f "$OGSDLL" ]]; then
     echo "ERROR: OGSFactory.dll not found." >&2
     exit 1
 fi
-# The binary patch is build-specific. Refuse to write at fixed offsets if the
-# first crash-site bytes do not match the tested Inventor 2026 binary.
+
+# The original null-pointer patch is build-specific. The Inventor 2026
+# OGSFactory.dll dated 2026-06-29 has a different code layout: the original
+# crash-site signature is absent and the old code-cave offsets are no longer
+# executable code. Recognize that exact DLL by SHA-256 and leave it untouched
+# so the newer Autodesk build can be tested without applying an invalid patch.
+OGS_UNPATCHED_20260629_SHA256="72b4bbbf8193526b1738197c4f8ad6c0b3848cac1cbd5880eb227924b0c5c177"
+ogs_sha256="$(sha256sum "$OGSDLL" | awk '{print $1}')"
 site1="$(od -An -tx1 -N8 -j $((0x56E5B)) "$OGSDLL" | tr -d ' \n')"
+
 if [[ "$site1" == e9009c0b00909090 ]]; then
     echo "  OGSFactory.dll already appears patched; skipping."
 elif [[ "$site1" == 488b4c2470488b11 ]]; then
@@ -430,10 +437,15 @@ elif [[ "$site1" == 488b4c2470488b11 ]]; then
     printf '\xe9\xc9\x9b\x0b\x00\x90\x90\x90' | dd of="$OGSDLL" bs=1 seek=$((0x56EA8)) conv=notrunc status=none
     printf '\x48\x8b\x4c\x24\x70\x48\x85\xc9\x0f\x84\x48\x64\xf4\xff\x48\x8b\x11\xe9\x24\x64\xf4\xff' | dd of="$OGSDLL" bs=1 seek=$((0x110A76)) conv=notrunc status=none
     echo "  Patched; original saved as OGSFactory.dll.original"
+elif [[ "$ogs_sha256" == "$OGS_UNPATCHED_20260629_SHA256" ]]; then
+    echo "  Recognized Inventor 2026 OGSFactory.dll dated 2026-06-29."
+    echo "  SHA-256: $ogs_sha256"
+    echo "  The older fixed-offset patch is not compatible with this build; leaving the DLL unmodified."
 else
-    echo "ERROR: OGSFactory.dll does not match the tested Inventor 2026 build at patch offset 0x56E5B." >&2
-    echo "       Found bytes: $site1" >&2
-    echo "       Refusing to apply a fixed-offset binary patch to an unknown build." >&2
+    echo "ERROR: OGSFactory.dll is not a supported build for the fixed-offset patch." >&2
+    echo "       SHA-256:    $ogs_sha256" >&2
+    echo "       Bytes @0x56E5B: $site1" >&2
+    echo "       Refusing to modify or silently skip an unknown OGSFactory.dll." >&2
     exit 1
 fi
 
