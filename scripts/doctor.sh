@@ -60,6 +60,13 @@ if [[ -d "$WINDOWS_MOUNT/Windows" ]]; then
     else
         fail "Autodesk Licensing version directory not found (configured: ${ADSK_LICENSING_VERSION:-auto})"
     fi
+
+    components_version="$(detect_adsk_components_version 2>/dev/null || true)"
+    if [[ -n "$components_version" ]]; then
+        ok "Autodesk Shared Components 2026/$components_version source found"
+    else
+        fail "Autodesk Shared Components 2026 version directory not found (configured: ${ADSK_COMPONENTS_VERSION:-auto})"
+    fi
 else
     fail "Windows source is not mounted at $WINDOWS_MOUNT (Linux-only server: see docs/windows-vm.md)"
 fi

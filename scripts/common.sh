@@ -14,6 +14,7 @@ CONFIG_FILE="${INVENTOR_CONFIG:-$PROJECT_DIR/inventor.env}"
 : "${DXVK_VERSION:=2.7.1}"
 : "${ADSK_IDENTITY_VERSION:=auto}"
 : "${ADSK_LICENSING_VERSION:=auto}"
+: "${ADSK_COMPONENTS_VERSION:=auto}"
 : "${DATA_DRIVE:=}"
 : "${DXVK_FILTER_DEVICE_UUID:=}"
 : "${INVENTOR_DISPLAY:=}"
@@ -86,6 +87,12 @@ detect_adsk_licensing_version() {
     detect_versioned_component \
         "$WINDOWS_MOUNT/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing" \
         "${ADSK_LICENSING_VERSION:-auto}"
+}
+
+detect_adsk_components_version() {
+    detect_versioned_component \
+        "$WINDOWS_MOUNT/Program Files/Common Files/Autodesk Shared/Components/2026" \
+        "${ADSK_COMPONENTS_VERSION:-auto}"
 }
 
 require_command() {

@@ -36,8 +36,16 @@ if [[ -z "$ADSK_LICENSING_SOURCE_VERSION" ]]; then
     exit 1
 fi
 
+ADSK_COMPONENTS_SOURCE_VERSION="$(detect_adsk_components_version 2>/dev/null || true)"
+if [[ -z "$ADSK_COMPONENTS_SOURCE_VERSION" ]]; then
+    echo "ERROR: Could not resolve Autodesk Shared Components 2026 under the Windows source." >&2
+    echo "       Configured ADSK_COMPONENTS_VERSION=${ADSK_COMPONENTS_VERSION:-auto}" >&2
+    exit 1
+fi
+
 IDENTITY_SOURCE="$WINDOWS_MOUNT/Program Files/Autodesk/AdskIdentityManager/$ADSK_IDENTITY_SOURCE_VERSION"
 LICENSING_SOURCE="$WINDOWS_MOUNT/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/$ADSK_LICENSING_SOURCE_VERSION"
+COMPONENTS_SOURCE="$WINDOWS_MOUNT/Program Files/Common Files/Autodesk Shared/Components/2026/$ADSK_COMPONENTS_SOURCE_VERSION"
 
 # Preflight source tree before deleting an existing prefix.
 required_paths=(
@@ -45,7 +53,7 @@ required_paths=(
     "$WINDOWS_MOUNT/Program Files/Autodesk/Inventor 2026/Bin"
     "$WINDOWS_MOUNT/Program Files/Autodesk/Inventor 2026/Configuration"
     "$WINDOWS_MOUNT/Program Files/Autodesk/Inventor 2026/Preferences"
-    "$WINDOWS_MOUNT/Program Files/Common Files/Autodesk Shared/Components/2026/1.8.0"
+    "$COMPONENTS_SOURCE"
     "$WINDOWS_MOUNT/Program Files/Common Files/Autodesk Shared/RealDWG Shared 2026"
     "$IDENTITY_SOURCE"
     "$LICENSING_SOURCE"
@@ -100,6 +108,7 @@ echo "Windows user:   $WIN_USER"
 echo "Wine prefix:    $WINEPREFIX"
 echo "Identity Mgr:   $ADSK_IDENTITY_SOURCE_VERSION"
 echo "Licensing:      $ADSK_LICENSING_SOURCE_VERSION"
+echo "Shared comps:   $ADSK_COMPONENTS_SOURCE_VERSION"
 
 step "Stopping Wine and creating a clean 64-bit prefix"
 "$WINESERVER_BIN" -k >/dev/null 2>&1 || true
@@ -123,7 +132,7 @@ cp -a "$WINDOWS_MOUNT/Program Files/Autodesk/Inventor 2026/Configuration" "$DEST
 cp -a "$WINDOWS_MOUNT/Program Files/Autodesk/Inventor 2026/Preferences" "$DEST/"
 
 step "Copying Autodesk Shared Components"
-for dll in "$WINDOWS_MOUNT/Program Files/Common Files/Autodesk Shared/Components/2026/1.8.0/"*.dll; do
+for dll in "$COMPONENTS_SOURCE/"*.dll; do
     base="$(basename "$dll")"
     [[ -f "$DEST/Bin/$base" ]] || cp "$dll" "$DEST/Bin/"
 done
@@ -216,7 +225,7 @@ step "Applying required Inventor registry keys"
 
 step "Applying Autodesk Shared Components registry keys"
 "$WINE_BIN" reg add 'HKLM\SOFTWARE\Autodesk\SharedComponents\2026' /v InstallPath /t REG_EXPAND_SZ /d 'C:\Program Files\Common Files\Autodesk Shared\Components\2026' /f >/dev/null
-"$WINE_BIN" reg add 'HKLM\SOFTWARE\Autodesk\SharedComponents\2026' /v Version /t REG_EXPAND_SZ /d 1.8.0 /f >/dev/null
+"$WINE_BIN" reg add 'HKLM\SOFTWARE\Autodesk\SharedComponents\2026' /v Version /t REG_EXPAND_SZ /d "$ADSK_COMPONENTS_SOURCE_VERSION" /f >/dev/null
 
 step "Applying Autodesk licensing/Identity Manager registry keys"
 "$WINE_BIN" reg add 'HKLM\SOFTWARE\Autodesk\AdskLicensing' /v Version /t REG_EXPAND_SZ /d "$ADSK_LICENSING_SOURCE_VERSION" /f >/dev/null
@@ -233,7 +242,7 @@ step "Registering the Windows-side adskidmgr protocol"
 
 step "Setting Wine Windows PATH"
 "$WINE_BIN" reg add 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' /v Path /t REG_EXPAND_SZ \
-    /d 'C:\windows\system32;C:\windows;C:\windows\system32\wbem;C:\Program Files\Common Files\Autodesk Shared\Components\2026\1.8.0;C:\Program Files\Autodesk\Inventor 2026\Bin' /f >/dev/null
+    /d "C:\\windows\system32;C:\\windows;C:\\windows\system32\wbem;C:\\Program Files\Common Files\Autodesk Shared\Components\2026\$ADSK_COMPONENTS_SOURCE_VERSION;C:\\Program Files\Autodesk\Inventor 2026\Bin" /f >/dev/null
 
 step "Installing IDSDK SSO plugin into the Licensing Agent"
 AGENTDIR="$WINEPREFIX/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/$ADSK_LICENSING_SOURCE_VERSION/AdskLicensingAgent"
@@ -247,8 +256,8 @@ cat > "$AGENTDIR/IDSDKVersionCompatibility.config" <<VEOF
         {
             "version": "0",
             "module": "IdSDKPlugin.dll",
-            "modulePath": "C:\\\\Program Files (x86)\\\\Common Files\\\\Autodesk Shared\\\\AdskLicensing\\\\$ADSK_LICENSING_VERSION\\\\AdskLicensingAgent\\\\SSOPlugin\\\\Current",
-            "modulePathWoW64": "C:\\\\Program Files (x86)\\\\Common Files\\\\Autodesk Shared\\\\AdskLicensing\\\\$ADSK_LICENSING_VERSION\\\\AdskLicensingAgent\\\\SSOPlugin\\\\Current",
+            "modulePath": "C:\\\\Program Files (x86)\\\\Common Files\\\\Autodesk Shared\\\\AdskLicensing\\\\$ADSK_LICENSING_SOURCE_VERSION\\\\AdskLicensingAgent\\\\SSOPlugin\\\\Current",
+            "modulePathWoW64": "C:\\\\Program Files (x86)\\\\Common Files\\\\Autodesk Shared\\\\AdskLicensing\\\\$ADSK_LICENSING_SOURCE_VERSION\\\\AdskLicensingAgent\\\\SSOPlugin\\\\Current",
             "compatibleSsoServicesVersion": { "minVersion": "0.0" }
         }
     ]

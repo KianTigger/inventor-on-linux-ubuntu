@@ -459,7 +459,7 @@ The rebuild performs a source-tree preflight **before** deleting an existing Win
 1. create a clean Wine 11.4 win64 prefix;
 2. set Windows 10 compatibility;
 3. install DXVK 2.7.1 using upstream DLLs;
-4. copy Inventor, Shared Components, MSVC/MFC runtimes and RealDWG;
+4. auto-detect the installed Autodesk Shared Components 2026 version and copy Inventor, Shared Components, MSVC/MFC runtimes and RealDWG;
 5. start the WebView2 Evergreen installer;
 6. copy Autodesk Identity Manager and Licensing Service;
 7. copy available Autodesk license/cache files;
