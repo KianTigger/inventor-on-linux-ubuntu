@@ -8,7 +8,6 @@ SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 # shellcheck source=common.sh
 source "$SCRIPT_DIR/common.sh"
 require_wine
-require_command winetricks "Run scripts/phase0-setup.sh"
 require_command rsync "Run scripts/phase0-setup.sh"
 
 FORCE=0
@@ -168,14 +167,34 @@ fi
 
 step "Setting Windows 10 compatibility mode"
 
-env \
+if ! env \
     -u DISPLAY \
     -u WAYLAND_DISPLAY \
-    PATH="$(dirname "$WINE_BIN"):$PATH" \
-    WINE="$WINE_BIN" \
-    WINESERVER="$WINESERVER_BIN" \
     WINEPREFIX="$WINEPREFIX" \
-    winetricks -q win10
+    "$WINE_BIN" winecfg -v win10; then
+    echo "ERROR: winecfg failed while setting Windows 10 compatibility mode." >&2
+    exit 1
+fi
+
+wine_windows_version="$(
+    timeout 10s env \
+        -u DISPLAY \
+        -u WAYLAND_DISPLAY \
+        WINEPREFIX="$WINEPREFIX" \
+        "$WINE_BIN" winecfg /v \
+        2>/dev/null | \
+        tr -d '\r' | \
+        tail -n1
+)" || true
+
+if [[ "$wine_windows_version" != "win10" ]]; then
+    echo "ERROR: Wine Windows version verification failed." >&2
+    echo "       Expected: win10" >&2
+    echo "       Found:    ${wine_windows_version:-<empty>}" >&2
+    exit 1
+fi
+
+echo "Wine Windows version: $wine_windows_version"
 
 step "Installing upstream DXVK $DXVK_VERSION"
 bash "$SCRIPT_DIR/install-dxvk-prefix.sh"
