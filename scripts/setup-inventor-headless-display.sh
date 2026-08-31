@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TARGET_GPU_UUID="d9af9e5935f8aff337a1d6d44d145cfc"
+TARGET_GPU_UUID="d9af9e59-35f8-aff3-37a1-d6d44d145cfc"
 DISPLAY_NUM="1"
 DISPLAY_NAME=":${DISPLAY_NUM}"
 VNC_PORT="5911"
