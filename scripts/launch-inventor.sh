@@ -31,6 +31,14 @@ INVENTOR_EXE="$WINEPREFIX/drive_c/Program Files/Autodesk/Inventor 2026/Bin/Inven
     exit 1
 }
 
+LICENSING_SERVICE="$WINEPREFIX/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/Current/AdskLicensingService/AdskLicensingService.exe"
+[[ -f "$LICENSING_SERVICE" ]] || {
+    echo "ERROR: Autodesk Licensing Service is missing from the Wine prefix:" >&2
+    echo "       $LICENSING_SERVICE" >&2
+    echo "       Run scripts/rebuild-prefix.sh first." >&2
+    exit 1
+}
+
 mkdir -p "$LOGDIR"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 IDSDK_USER="$(printf '%s' "$USER" | od -An -tx1 | tr -d ' \n' | tr '[:lower:]' '[:upper:]')"
@@ -98,7 +106,7 @@ if (( IDMGR_READY == 0 )); then
 fi
 
 echo "[3/4] Starting Autodesk Licensing Service..."
-"$WINE_BIN" "C:\\Program Files (x86)\\Common Files\\Autodesk Shared\\AdskLicensing\\${ADSK_LICENSING_VERSION}\\AdskLicensingService\\AdskLicensingService.exe" \
+"$WINE_BIN" 'C:\Program Files (x86)\Common Files\Autodesk Shared\AdskLicensing\Current\AdskLicensingService\AdskLicensingService.exe' \
     2>&1 | tee "$LOGDIR/licensing-$TIMESTAMP.log" &
 sleep 5
 if pgrep -f 'AdskLicensingService.exe' >/dev/null 2>&1; then
