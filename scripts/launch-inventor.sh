@@ -11,6 +11,7 @@ require_wine
 normalize_gpu_uuid
 
 WEBVIEW2_GUID='{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+WEBVIEW2_WINE_VERSION="win8"
 
 webview2_version() {
     local key output version
@@ -35,6 +36,85 @@ webview2_version() {
     return 1
 }
 
+prepare_standard_xauthority() {
+    local source_xauthority="${XAUTHORITY:-}"
+    local standard_xauthority="$HOME/.Xauthority"
+
+    # Firefox on Ubuntu is normally delivered as a Snap and may not be able to
+    # use a custom XAUTHORITY path such as ~/.Xauthority-inventor. Mirror the
+    # active cookie into the conventional ~/.Xauthority file and use that for
+    # the launcher and all child processes.
+    if [[ -n "$source_xauthority" && "$source_xauthority" != "$standard_xauthority" ]]; then
+        if [[ ! -r "$source_xauthority" ]]; then
+            echo "ERROR: Configured XAUTHORITY is not readable:" >&2
+            echo "       $source_xauthority" >&2
+            return 1
+        fi
+
+        require_command xauth \
+            "Install xauth or rerun scripts/setup-inventor-headless-display.sh setup"
+
+        touch "$standard_xauthority"
+        chmod 600 "$standard_xauthority"
+
+        if ! xauth -f "$source_xauthority" nlist |
+            xauth -f "$standard_xauthority" nmerge -; then
+            echo "ERROR: Could not copy the active X11 authentication cookie into:" >&2
+            echo "       $standard_xauthority" >&2
+            return 1
+        fi
+
+        export XAUTHORITY="$standard_xauthority"
+    elif [[ -z "$source_xauthority" && -r "$standard_xauthority" ]]; then
+        export XAUTHORITY="$standard_xauthority"
+    fi
+
+    # Fail early if the display/cookie combination is unusable. This catches a
+    # stale headless-X cookie before Autodesk or Firefox are started.
+    if command -v xdpyinfo >/dev/null 2>&1; then
+        if ! xdpyinfo >/dev/null 2>&1; then
+            echo "ERROR: Cannot authenticate to X display ${DISPLAY:-<unset>}." >&2
+            echo "       XAUTHORITY=${XAUTHORITY:-<unset>}" >&2
+            return 1
+        fi
+    fi
+}
+
+apply_webview2_wine_compat() {
+    # Wine 11.4 + current WebView2 requires an older per-application Windows
+    # version while the rest of the Inventor prefix remains Windows 10.
+    if ! WINEDEBUG=-all \
+        WINEPREFIX="$WINEPREFIX" \
+        "$WINE_BIN" reg add \
+            'HKCU\Software\Wine\AppDefaults\msedgewebview2.exe' \
+            /v Version \
+            /t REG_SZ \
+            /d "$WEBVIEW2_WINE_VERSION" \
+            /f >/dev/null 2>&1; then
+        echo "ERROR: Could not configure the WebView2 Wine compatibility override." >&2
+        return 1
+    fi
+
+    local configured
+    configured="$(
+        WINEDEBUG=-all \
+        WINEPREFIX="$WINEPREFIX" \
+        "$WINE_BIN" reg query \
+            'HKCU\Software\Wine\AppDefaults\msedgewebview2.exe' \
+            /v Version \
+            2>&1 |
+            tr -d '\r' |
+            awk 'tolower($1)=="version" && toupper($2)=="REG_SZ" {print tolower($3); exit}'
+    )" || true
+
+    if [[ "$configured" != "$WEBVIEW2_WINE_VERSION" ]]; then
+        echo "ERROR: WebView2 Wine compatibility verification failed." >&2
+        echo "       Expected: $WEBVIEW2_WINE_VERSION" >&2
+        echo "       Found:    ${configured:-<empty>}" >&2
+        return 1
+    fi
+}
+
 if ! detect_graphical_session; then
     cat >&2 <<'MSG'
 ERROR: No graphical DISPLAY is available to this shell.
@@ -48,6 +128,8 @@ See README.md -> "Ubuntu server / SSH display setup".
 MSG
     exit 1
 fi
+
+prepare_standard_xauthority
 
 INVENTOR_EXE="$WINEPREFIX/drive_c/Program Files/Autodesk/Inventor 2026/Bin/Inventor.exe"
 [[ -f "$INVENTOR_EXE" ]] || {
@@ -79,6 +161,8 @@ if [[ -z "$webview_version" ]]; then
     exit 1
 fi
 
+apply_webview2_wine_compat
+
 # Autodesk documents this as the WebView2 user-data location used by licensing.
 AUTODESK_USER_ROOT="$WINEPREFIX/drive_c/users/$USER/Autodesk"
 mkdir -p "$AUTODESK_USER_ROOT/AdskLicensingAgent"
@@ -108,7 +192,9 @@ trap cleanup SIGTERM SIGINT EXIT
 echo "=== Starting Inventor 2026 ==="
 echo "Wine:     $($WINE_BIN --version)"
 echo "Display:  ${DISPLAY:-unset}"
+echo "X auth:   ${XAUTHORITY:-unset}"
 echo "WebView2: $webview_version"
+echo "WebView2 Wine mode: $WEBVIEW2_WINE_VERSION"
 if [[ -n "${DXVK_FILTER_DEVICE_UUID:-}" ]]; then
     echo "GPU UUID: $DXVK_FILTER_DEVICE_UUID"
 else
