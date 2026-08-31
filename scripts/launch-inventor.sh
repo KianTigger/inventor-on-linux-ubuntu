@@ -10,6 +10,31 @@ source "$SCRIPT_DIR/common.sh"
 require_wine
 normalize_gpu_uuid
 
+WEBVIEW2_GUID='{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+
+webview2_version() {
+    local key output version
+    for key in \
+        "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\$WEBVIEW2_GUID" \
+        "HKCU\\Software\\Microsoft\\EdgeUpdate\\Clients\\$WEBVIEW2_GUID"; do
+        output="$(
+            WINEDEBUG=-all \
+            WINEPREFIX="$WINEPREFIX" \
+            "$WINE_BIN" reg query "$key" /v pv 2>&1 || true
+        )"
+        version="$(
+            printf '%s\n' "$output" |
+                tr -d '\r' |
+                awk 'tolower($1)=="pv" && toupper($2)=="REG_SZ" {print $3; exit}'
+        )"
+        if [[ -n "$version" && "$version" != "0.0.0.0" ]]; then
+            printf '%s\n' "$version"
+            return 0
+        fi
+    done
+    return 1
+}
+
 if ! detect_graphical_session; then
     cat >&2 <<'MSG'
 ERROR: No graphical DISPLAY is available to this shell.
@@ -39,6 +64,26 @@ LICENSING_SERVICE="$WINEPREFIX/drive_c/Program Files (x86)/Common Files/Autodesk
     exit 1
 }
 
+webview_version="$(webview2_version || true)"
+if [[ -z "$webview_version" ]]; then
+    echo "WebView2 Runtime is not installed in this Wine prefix."
+    echo "Installing it now before Autodesk Licensing starts..."
+    echo
+    bash "$SCRIPT_DIR/install-webview2.sh"
+    webview_version="$(webview2_version || true)"
+fi
+
+if [[ -z "$webview_version" ]]; then
+    echo "ERROR: WebView2 Runtime is still unavailable." >&2
+    echo "       Run scripts/install-webview2.sh and inspect its log before launching Inventor." >&2
+    exit 1
+fi
+
+# Autodesk documents this as the WebView2 user-data location used by licensing.
+AUTODESK_USER_ROOT="$WINEPREFIX/drive_c/users/$USER/Autodesk"
+mkdir -p "$AUTODESK_USER_ROOT/AdskLicensingAgent"
+chmod -R u+rwX "$AUTODESK_USER_ROOT"
+
 mkdir -p "$LOGDIR"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 IDSDK_USER="$(printf '%s' "$USER" | od -An -tx1 | tr -d ' \n' | tr '[:lower:]' '[:upper:]')"
@@ -61,14 +106,15 @@ cleanup() {
 trap cleanup SIGTERM SIGINT EXIT
 
 echo "=== Starting Inventor 2026 ==="
-echo "Wine:    $($WINE_BIN --version)"
-echo "Display: ${DISPLAY:-unset}"
+echo "Wine:     $($WINE_BIN --version)"
+echo "Display:  ${DISPLAY:-unset}"
+echo "WebView2: $webview_version"
 if [[ -n "${DXVK_FILTER_DEVICE_UUID:-}" ]]; then
     echo "GPU UUID: $DXVK_FILTER_DEVICE_UUID"
 else
     echo "GPU UUID: automatic (set DXVK_FILTER_DEVICE_UUID in inventor.env to pin one GPU)"
 fi
-echo "Logs:    $LOGDIR"
+echo "Logs:     $LOGDIR"
 
 # Clear all stale IDSDK interprocess sessions, not just one directory.
 echo "[0/4] Cleaning Autodesk Identity Services IPC state..."

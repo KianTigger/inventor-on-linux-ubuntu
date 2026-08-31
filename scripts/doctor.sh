@@ -12,6 +12,31 @@ ok()   { printf 'OK   %s\n' "$*"; }
 warn() { printf 'WARN %s\n' "$*"; warnings=$((warnings+1)); }
 fail() { printf 'FAIL %s\n' "$*"; failures=$((failures+1)); }
 
+WEBVIEW2_GUID='{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+
+webview2_version() {
+    local key output version
+    for key in \
+        "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\$WEBVIEW2_GUID" \
+        "HKCU\\Software\\Microsoft\\EdgeUpdate\\Clients\\$WEBVIEW2_GUID"; do
+        output="$(
+            WINEDEBUG=-all \
+            WINEPREFIX="$WINEPREFIX" \
+            "$WINE_BIN" reg query "$key" /v pv 2>&1 || true
+        )"
+        version="$(
+            printf '%s\n' "$output" |
+                tr -d '\r' |
+                awk 'tolower($1)=="pv" && toupper($2)=="REG_SZ" {print $3; exit}'
+        )"
+        if [[ -n "$version" && "$version" != "0.0.0.0" ]]; then
+            printf '%s\n' "$version"
+            return 0
+        fi
+    done
+    return 1
+}
+
 printf '=== Inventor on Linux doctor ===\n'
 printf 'Project: %s\n\n' "$PROJECT_DIR"
 
@@ -26,7 +51,22 @@ kmajor="$(uname -r | cut -d. -f1)"; (( kmajor >= 6 )) && ok "Kernel: $(uname -r)
 
 if require_wine >/dev/null 2>&1; then ok "Wine: $($WINE_BIN --version) ($WINE_BIN)"; else fail "Wine $WINE_VERSION not detected"; fi
 [[ -f "$DXVK_DIR/x64/d3d11.dll" && -f "$DXVK_DIR/x64/dxgi.dll" ]] && ok "DXVK $DXVK_VERSION: $DXVK_DIR" || fail "DXVK $DXVK_VERSION missing at $DXVK_DIR"
-[[ -s "$WEBVIEW2_INSTALLER" ]] && ok "WebView2 installer: $WEBVIEW2_INSTALLER" || fail "WebView2 installer missing; run phase0-setup.sh"
+[[ -s "$WEBVIEW2_INSTALLER" ]] && ok "WebView2 installer cached: $WEBVIEW2_INSTALLER" || fail "WebView2 installer missing; run phase0-setup.sh"
+
+if [[ -f "$WINEPREFIX/drive_c/windows/system32/cmd.exe" && -n "${WINE_BIN:-}" ]]; then
+    webview_version="$(webview2_version || true)"
+    if [[ -n "$webview_version" ]]; then
+        ok "WebView2 Runtime installed: $webview_version"
+    else
+        fail "WebView2 Runtime is not installed in the Wine prefix; run scripts/install-webview2.sh from the graphical Inventor session"
+    fi
+
+    licensing_service="$WINEPREFIX/drive_c/Program Files (x86)/Common Files/Autodesk Shared/AdskLicensing/Current/AdskLicensingService/AdskLicensingService.exe"
+    [[ -f "$licensing_service" ]] && ok "Autodesk Licensing Service present in Wine Current directory" || fail "Autodesk Licensing Service missing from Wine Current directory; rebuild the prefix"
+else
+    warn "Wine prefix is not built yet; WebView2 Runtime and Wine-side Autodesk components cannot be checked"
+fi
+
 command -v hivexregedit >/dev/null 2>&1 && ok "hivexregedit available" || fail "hivexregedit missing"
 command -v winetricks >/dev/null 2>&1 && ok "winetricks available" || fail "winetricks missing"
 if command -v xdg-settings >/dev/null 2>&1; then

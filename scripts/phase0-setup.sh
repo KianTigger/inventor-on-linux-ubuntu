@@ -25,7 +25,7 @@ if [[ "${ID:-}" != "ubuntu" || "${VERSION_ID:-}" != "22.04" ]]; then
     echo "       Detected: ${PRETTY_NAME:-unknown}" >&2
     exit 1
 fi
-if [[ "$(uname -m)" != "x86_64" ]]; then
+if [[ "$(uname -m)" != x86_64 ]]; then
     echo "ERROR: x86_64 is required; detected $(uname -m)." >&2
     exit 1
 fi
@@ -152,9 +152,13 @@ vulkaninfo --summary >/tmp/inventor-vulkan-summary.txt 2>&1 || {
 cat <<EOF2
 
 === Phase 0 complete ===
-Wine:     $actual_wine
-DXVK:     $DXVK_DIR
-WebView2: $WEBVIEW2_INSTALLER
+Wine:               $actual_wine
+DXVK:               $DXVK_DIR
+WebView2 installer: $WEBVIEW2_INSTALLER
+
+NOTE: Phase 0 downloads the WebView2 installer only.
+      Install the runtime after the Wine prefix exists and a real graphical
+      Linux display is available.
 
 Next:
   1. cp inventor.env.example inventor.env
@@ -164,5 +168,8 @@ Next:
   5. bash scripts/rebuild-prefix.sh
   6. bash scripts/install-wbemprox-patch.sh
   7. bash scripts/setup-user-integration.sh
-  8. bash scripts/launch-inventor.sh
+  8. Configure/start the graphical Linux session used by Inventor.
+  9. bash scripts/install-webview2.sh
+ 10. bash scripts/doctor.sh
+ 11. bash scripts/launch-inventor.sh
 EOF2
