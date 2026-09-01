@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Handle adskidmgr:// protocol callbacks from the browser without stopping the
+# Handle adskidmgr: protocol callbacks from the browser without stopping the
 # running Wine server.
 set -euo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
@@ -25,9 +25,6 @@ prepare_callback_display() {
     local active_xauthority="${XAUTHORITY:-}"
     local standard_xauthority="$HOME/.Xauthority"
 
-    # Firefox Snap and desktop-portal launches work most reliably with the
-    # conventional ~/.Xauthority path. If the Inventor headless session uses a
-    # custom authority file, copy its current cookie into ~/.Xauthority.
     if [[ -n "$active_xauthority" &&
           "$active_xauthority" != "$standard_xauthority" &&
           -r "$active_xauthority" &&
@@ -57,8 +54,15 @@ prepare_callback_display() {
 }
 
 uri="${1:-}"
-if [[ -z "$uri" || "$uri" != adskidmgr://* ]]; then
-    log "ERROR: Expected an adskidmgr:// callback URI."
+
+# Autodesk callbacks may use either adskidmgr://... or adskidmgr:/...
+# Validate the scheme rather than requiring an exact slash count.
+if [[ -z "$uri" || "$uri" != adskidmgr:* ]]; then
+    log "ERROR: Expected an adskidmgr: callback URI."
+    log "Argument count: $#"
+    if [[ -n "$uri" ]]; then
+        log "First argument scheme did not match adskidmgr (value redacted)."
+    fi
     exit 2
 fi
 
@@ -68,6 +72,18 @@ log "=== Autodesk Identity Manager callback ==="
 log "Timestamp: $(date --iso-8601=seconds)"
 log "URI: received and validated (redacted)"
 log "URI length: ${#uri}"
+
+case "$uri" in
+    adskidmgr://*)
+        log "URI form: double-slash"
+        ;;
+    adskidmgr:/*)
+        log "URI form: single-slash"
+        ;;
+    *)
+        log "URI form: scheme-only/other valid adskidmgr form"
+        ;;
+esac
 
 if ! prepare_callback_display; then
     exit 1
