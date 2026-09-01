@@ -55,33 +55,41 @@ prepare_callback_display() {
 
 uri="${1:-}"
 
-# Autodesk callbacks may use either adskidmgr://... or adskidmgr:/...
-# Validate the scheme rather than requiring an exact slash count.
-if [[ -z "$uri" || "$uri" != adskidmgr:* ]]; then
-    log "ERROR: Expected an adskidmgr: callback URI."
-    log "Argument count: $#"
-    if [[ -n "$uri" ]]; then
-        log "First argument scheme did not match adskidmgr (value redacted)."
-    fi
-    exit 2
-fi
+# Autodesk Identity Manager callbacks may use either the adskidmgr or
+# adsk.idmgr scheme, with varying slash forms. Validate the scheme rather
+# than requiring an exact slash count.
+case "$uri" in
+    adskidmgr:*|adsk.idmgr:*)
+        ;;
+    *)
+        log "ERROR: Expected an Autodesk Identity Manager callback URI."
+        log "Argument count: $#"
+        if [[ -n "$uri" ]]; then
+            log "First argument scheme was not recognised (value redacted)."
+        fi
+        exit 2
+        ;;
+esac
 
 # Do not write the callback URI itself to disk. It can contain an OAuth
 # authorization code or other short-lived authentication material.
+uri_scheme="${uri%%:*}"
+
 log "=== Autodesk Identity Manager callback ==="
 log "Timestamp: $(date --iso-8601=seconds)"
+log "URI scheme: $uri_scheme"
 log "URI: received and validated (redacted)"
 log "URI length: ${#uri}"
 
 case "$uri" in
-    adskidmgr://*)
+    adskidmgr://*|adsk.idmgr://*)
         log "URI form: double-slash"
         ;;
-    adskidmgr:/*)
+    adskidmgr:/*|adsk.idmgr:/*)
         log "URI form: single-slash"
         ;;
     *)
-        log "URI form: scheme-only/other valid adskidmgr form"
+        log "URI form: scheme-only/other valid form"
         ;;
 esac
 

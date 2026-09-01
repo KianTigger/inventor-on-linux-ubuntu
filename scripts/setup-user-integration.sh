@@ -23,7 +23,7 @@ cat > "$HOME/.local/share/applications/adskidmgr-handler.desktop" <<EOF2
 Type=Application
 Name=Autodesk Identity Manager
 Exec=$HOME/.local/bin/adskidmgr-callback %u
-MimeType=x-scheme-handler/adskidmgr;
+MimeType=x-scheme-handler/adskidmgr;x-scheme-handler/adsk.idmgr;
 NoDisplay=true
 Terminal=false
 EOF2
@@ -53,5 +53,6 @@ EOF2
 update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
 
 echo "User integration installed."
-echo "OAuth handler: $(xdg-mime query default x-scheme-handler/adskidmgr 2>/dev/null || echo unknown)"
+echo "OAuth handler (adskidmgr): $(xdg-mime query default x-scheme-handler/adskidmgr 2>/dev/null || echo unknown)"
+echo "OAuth handler (adsk.idmgr): $(xdg-mime query default x-scheme-handler/adsk.idmgr 2>/dev/null || echo unknown)"
 echo "Launcher:      $HOME/.local/bin/launch-inventor"
