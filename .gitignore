@@ -1,9 +1,19 @@
-logs/
-*.tar.gz
-*.tar.zst
-backtrace*.txt
-registry/autodesk-full.reg
-inventor.env
-
+# Local configuration / secrets
 windows-vm.env
-Win11_English_x64.iso
+.bridge-client.env
+windows_bridge/.env
+
+# Runtime output
+windows_bridge/.venv/
+windows_bridge/logs/
+windows_bridge/*.pid
+__pycache__/
+*.pyc
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+dist/windows-bridge.zip
