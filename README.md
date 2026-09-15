@@ -1,6 +1,6 @@
-# Autodesk Inventor 2026 on an Ubuntu server — Windows VM COM bridge
+# Autodesk Inventor 2026 COM bridge for Ubuntu
 
-This repository replaces the previous Wine-based approach. Autodesk Inventor remains installed and licensed inside the existing Windows 11 libvirt/KVM VM, while Ubuntu applications call a small authenticated HTTP bridge inside that VM.
+Run Autodesk Inventor 2026 inside a Windows 11 KVM/libvirt virtual machine while Ubuntu applications use Inventor through a small authenticated network bridge. All Inventor COM calls execute locally inside Windows through `pywin32`; Linux applications communicate with the bridge over HTTP.
 
 ## Architecture
 
@@ -9,9 +9,9 @@ Ubuntu host / Rishika
         |
         | HTTP + API token
         v
-Windows 11 VM (inventor-win11)
+Windows 11 VM (default: inventor-win11)
         |
-        | one serialized COM worker thread
+        | serialized pywin32 COM worker
         v
 Inventor.Application
         |
@@ -20,129 +20,105 @@ Inventor.Application
         +--> model.step
 ```
 
-Linux never instantiates COM and Inventor never needs Wine. The Windows bridge keeps all Autodesk licensing, Identity Manager, WebView2, graphics and COM behavior on the supported Windows installation.
+## Start here
 
-## What is in this repository
+For a **new Ubuntu server with no Windows VM**, follow:
 
-- `windows_bridge/` — FastAPI server and serialized Inventor COM worker, installed inside the Windows VM.
-- `dist/windows-bridge.zip` — transfer-ready copy of `windows_bridge/` for the VM.
-- `scripts/linux/vm-ip.sh` — discovers the VM IPv4 address through libvirt.
-- `scripts/linux/start-windows-vm.sh` — starts the existing `inventor-win11` domain.
-- `scripts/linux/bridge-health.sh` — verifies Ubuntu -> VM -> Inventor COM end-to-end.
-- `scripts/linux/configure-rishika.sh` — writes matching bridge settings into an extracted Rishika directory.
-- `.bridge-client.env` — generated local API token/configuration. It is gitignored.
+**[`docs/SETUP.md`](docs/SETUP.md)**
 
-## 1. Replace the old repository on Ubuntu
+It contains the complete installation from KVM/libvirt prerequisites through Windows 11 installation, Inventor installation/licensing, bridge installation, Rishika configuration, normal startup order, shutdown and troubleshooting.
 
-Extract this archive where the old `inventor-on-linux-ubuntu` repository lived. If your libvirt domain is not named `inventor-win11`, create `windows-vm.env` from the example and change `VM_NAME`.
+### Exact first-time installation order
 
-```bash
-cp windows-vm.env.example windows-vm.env
-nano windows-vm.env
+1. Extract this repository on Ubuntu.
+2. Run `bash scripts/linux/setup-host.sh`.
+3. Log out and back in.
+4. Download an official Windows 11 x64 ISO.
+5. Copy `windows-vm.env.example` to `windows-vm.env` and configure it.
+6. Run `bash scripts/linux/create-windows-vm.sh`.
+7. Connect to the VM's VNC console through an SSH tunnel and install Windows 11.
+8. Complete Windows Update.
+9. Install Python 3.11+ x64 in Windows.
+10. Install Autodesk Inventor 2026 in Windows.
+11. Launch Inventor manually and complete Autodesk sign-in/licensing and first-run dialogs.
+12. Copy `dist/windows-bridge.zip` into Windows and extract it to `C:\InventorVmBridge`.
+13. In Administrator PowerShell run `Set-ExecutionPolicy -Scope Process Bypass`, then `.\install.ps1`.
+14. In Windows run `.\test_bridge.ps1`.
+15. On Ubuntu run `bash scripts/linux/bridge-health.sh`.
+16. Extract/configure the supplied Rishika package.
+17. In Rishika run `python3 src/preflight.py --phase windows` and an actual CAD bridge test.
+18. Start Rishika normally.
+
+Do not skip the manual Inventor launch/sign-in before relying on unattended bridge startup.
+
+## Repository layout
+
+```text
+README.md
+windows-vm.env.example
+docs/
+  SETUP.md
+scripts/linux/
+  common-vm.sh
+  setup-host.sh
+  create-windows-vm.sh
+  start-windows-vm.sh
+  stop-windows-vm.sh
+  vm-ip.sh
+  doctor.sh
+  bridge-health.sh
+  configure-rishika.sh
+windows_bridge/
+  install.ps1
+  start_bridge.ps1
+  stop_bridge.ps1
+  test_bridge.ps1
+  server.py
+  inventor_worker.py
+  ...
+dist/
+  windows-bridge.zip
 ```
 
-The supplied `.bridge-client.env` contains a generated token that matches the supplied `windows_bridge/.env`. Both files are intentionally excluded by `.gitignore`.
+## Normal startup after installation
 
-## 2. Start the existing Windows VM
+On Ubuntu:
 
 ```bash
 bash scripts/linux/start-windows-vm.sh
 ```
 
-If automatic address discovery works, this also prints the VM IPv4 address. If not, run `ipconfig` in Windows and set `VM_IP` in `windows-vm.env`.
-
-## 3. Install the bridge inside Windows
-
-Transfer `dist/windows-bridge.zip` into the Windows VM, for example through the existing VNC/RDP session or another file-transfer method. Extract it to a persistent location such as:
-
-```text
-C:\InventorVmBridge
-```
-
-Open **PowerShell as Administrator** in that directory and run:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\install.ps1
-```
-
-The installer:
-
-1. creates a local Python virtual environment;
-2. installs FastAPI, pywin32 and bridge dependencies;
-3. creates an inbound Windows Firewall rule for TCP 8765;
-4. registers `Inventor VM Bridge` as an **interactive-user logon task**, not a Windows service;
-5. starts the bridge;
-6. tests local bridge -> Inventor COM connectivity.
-
-### Important Windows session requirement
-
-The bridge intentionally runs in the logged-in desktop session because Inventor is an interactive desktop application. Keep the Autodesk-licensed Windows user logged in. The session may be locked/disconnected, but do not run the bridge as a Session 0 Windows service.
-
-Launch Inventor manually once after installation if Autodesk requires sign-in or first-run dialogs. After that, the bridge can attach to the existing process or start Inventor automatically.
-
-## 4. Verify from Ubuntu
+Sign in to the configured Windows desktop user. The **Inventor VM Bridge** Scheduled Task starts at logon. Then verify from Ubuntu:
 
 ```bash
 bash scripts/linux/bridge-health.sh
 ```
 
-Expected shape of the result:
-
-```json
-{"status":"ready","worker_alive":true}
-{"inventor_connected":true,"inventor_version":"..."}
-```
-
-This test proves the complete path:
-
-```text
-Ubuntu -> VM TCP -> authenticated bridge -> pywin32 -> Inventor.Application
-```
-
-## 5. Connect Rishika
-
-The companion replacement `Rishika.zip` already contains the same generated bridge token and defaults to:
-
-```dotenv
-INVENTOR_BACKEND=remote
-INVENTOR_BRIDGE_URL=auto
-INVENTOR_VM_NAME=inventor-win11
-INVENTOR_BRIDGE_PORT=8765
-```
-
-If you extract a different Rishika copy, synchronize its bridge settings with:
+Start Rishika:
 
 ```bash
-bash scripts/linux/configure-rishika.sh /path/to/Rishika
+cd /path/to/Rishika
+./search_app.sh
 ```
 
-`INVENTOR_BRIDGE_URL=auto` is designed for Rishika running directly on the same Ubuntu/libvirt host. If Rishika runs inside Docker or on another machine, set an explicit URL instead:
+The VNC console does not need to stay connected for normal automation. The Windows user session does need to remain logged in.
 
-```dotenv
-INVENTOR_BRIDGE_URL=http://<windows-vm-ip>:8765
-```
+## Bridge API
 
-## API
-
-### Health
+### Process health
 
 ```text
 GET /health
 ```
 
-Does not require authentication and only reports bridge process health.
-
-### Inventor status
+### Inventor/COM status
 
 ```text
 GET /v1/status
 X-Inventor-Bridge-Token: <token>
 ```
 
-Attaches to or starts `Inventor.Application` and returns basic status.
-
-### Extract CAD
+### Extract CAD metadata and geometry
 
 ```text
 POST /v1/extract
@@ -151,7 +127,7 @@ Content-Type: multipart/form-data
 file=<IPT/IAM/STEP/STP/ZIP>
 ```
 
-Returns a ZIP containing:
+The response ZIP contains:
 
 ```text
 metadata.json
@@ -160,37 +136,38 @@ model.step
 bridge.json
 ```
 
-For an assembly with external references, upload a ZIP containing the root `.iam` plus all referenced `.ipt` files with relative paths preserved. The bridge safely extracts the bundle in Windows and opens the most likely root assembly.
+For an assembly with external references, upload a ZIP containing the root `.iam` and all referenced `.ipt` files with relative paths preserved.
 
-## Concurrency model
+## Concurrency
 
-FastAPI may accept multiple network requests, but all Inventor operations are placed on one dedicated COM STA thread. This prevents concurrent arbitrary request threads from touching the same Inventor automation object. Requests are therefore serialized at the Inventor boundary.
+Network requests may arrive concurrently, but all Inventor work is serialized onto one dedicated COM STA worker thread. Arbitrary HTTP worker threads never operate on the Inventor COM object directly.
 
-## Security model
+## Configuration and secrets
 
-- `/v1/*` requires a long random `X-Inventor-Bridge-Token`.
-- The generated token lives only in gitignored `.env` files.
-- Do not expose TCP 8765 to the public internet.
-- The Windows firewall rule is for the VM NIC; use libvirt/NAT or your LAN firewall to keep it private.
-- Uploaded CAD files are stored only in per-request temporary directories and removed after the response is sent.
-- ZIP extraction rejects path traversal entries.
+- `windows-vm.env` — local VM sizing, ISO path, optional fixed IP; gitignored.
+- `.bridge-client.env` — Ubuntu bridge token/client settings; gitignored.
+- `windows_bridge/.env` — Windows bridge token/runtime settings; gitignored.
+- Rishika `.env` — application-side bridge settings; should remain private.
 
-## Bridge administration in Windows
+The supplied package contains matching bridge/client tokens so the two supplied archives work together. If you generate/rotate a token, update both Windows and Rishika/Ubuntu configurations.
+
+## Administration
+
+Ubuntu:
+
+```bash
+bash scripts/linux/doctor.sh
+bash scripts/linux/vm-ip.sh
+bash scripts/linux/bridge-health.sh
+bash scripts/linux/stop-windows-vm.sh
+```
+
+Windows (`C:\InventorVmBridge`):
 
 ```powershell
-.\test_bridge.ps1
-.\stop_bridge.ps1
 .\start_bridge.ps1
+.\stop_bridge.ps1
+.\test_bridge.ps1
 ```
 
-Logs are written under:
-
-```text
-windows_bridge\logs\
-```
-
-Stopping the bridge leaves Inventor running by default. Set `INVENTOR_QUIT_ON_BRIDGE_EXIT=true` only if you explicitly want the bridge to close an Inventor process that it started.
-
-## Why the Wine files were removed
-
-The previous repository existed to reproduce enough Windows behavior under Wine to start Inventor. That is no longer needed for this architecture. The VM remains the Inventor execution environment; Ubuntu is now the orchestration and application environment.
+See [`docs/SETUP.md`](docs/SETUP.md) for detailed troubleshooting and security guidance.

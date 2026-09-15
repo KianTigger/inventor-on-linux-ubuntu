@@ -9,6 +9,7 @@ RISHIKA="$(readlink -f "$1")"
 [[ -f "$RISHIKA/.env" ]] || { echo "ERROR: $RISHIKA/.env does not exist" >&2; exit 1; }
 # shellcheck disable=SC1091
 source "$ROOT/.bridge-client.env"
+[[ -f "$ROOT/windows-vm.env" ]] && source "$ROOT/windows-vm.env"
 python3 - "$RISHIKA/.env" "$INVENTOR_BRIDGE_TOKEN" "${VM_NAME:-inventor-win11}" "${INVENTOR_BRIDGE_PORT:-8765}" <<'PY'
 from pathlib import Path
 import sys
