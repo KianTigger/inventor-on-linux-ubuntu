@@ -59,7 +59,40 @@ if (-not $NoScheduledTask) {
 }
 
 & "$Root\start_bridge.ps1"
-Start-Sleep -Seconds 2
+
+# The Python process can need several seconds on first launch while imports,
+# pywin32 and Inventor COM initialize. Wait for /health instead of assuming a
+# fixed two-second startup time.
+$healthUri = "http://127.0.0.1:$Port/health"
+$deadline = (Get-Date).AddSeconds(45)
+$bridgeReady = $false
+while ((Get-Date) -lt $deadline) {
+    try {
+        $health = Invoke-RestMethod -Uri $healthUri -TimeoutSec 3
+        if ($health.status -eq 'ready') {
+            $bridgeReady = $true
+            break
+        }
+    } catch {
+        Start-Sleep -Seconds 1
+    }
+}
+
+if (-not $bridgeReady) {
+    Write-Host "Bridge did not become ready within 45 seconds." -ForegroundColor Red
+    $errLog = Join-Path $Root "logs\bridge.err.log"
+    $outLog = Join-Path $Root "logs\bridge.out.log"
+    if (Test-Path $errLog) {
+        Write-Host "--- bridge.err.log ---" -ForegroundColor Yellow
+        Get-Content $errLog -Tail 100
+    }
+    if (Test-Path $outLog) {
+        Write-Host "--- bridge.out.log ---" -ForegroundColor Yellow
+        Get-Content $outLog -Tail 100
+    }
+    throw "Inventor VM Bridge failed to become healthy."
+}
+
 & "$Root\test_bridge.ps1"
 
 Write-Host ""

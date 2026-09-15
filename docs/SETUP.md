@@ -44,10 +44,11 @@ Use this order for a new deployment:
 12. Transfer `dist/windows-bridge.zip` from Ubuntu into Windows.
 13. Extract the bridge to `C:\InventorVmBridge` and run `install.ps1` as Administrator.
 14. Verify the bridge locally in Windows with `test_bridge.ps1`.
-15. Verify Ubuntu -> Windows -> Inventor COM with `scripts/linux/bridge-health.sh`.
-16. Extract/configure Rishika on Ubuntu.
-17. Run Rishika's Windows/Inventor preflight test.
-18. Start Rishika normally.
+15. On Ubuntu, save the Windows VM IPv4 address as `VM_IP` in `.bridge-client.env`. The recommended command is `bash scripts/linux/set-vm-ip.sh`; you can also pass the address explicitly.
+16. Verify Ubuntu -> Windows -> Inventor COM with `scripts/linux/bridge-health.sh`.
+17. Extract/configure Rishika on Ubuntu and run `bash scripts/linux/configure-rishika.sh /path/to/Rishika`.
+18. Run Rishika's Windows/Inventor preflight test.
+19. Start Rishika normally.
 
 The remainder of this guide expands every step.
 
@@ -247,6 +248,8 @@ The bridge deliberately runs in the interactive Windows user session, not as a S
 
 The supplied `windows_bridge/.env` and Ubuntu `.bridge-client.env` contain the same generated API token. Both are ignored by Git so the token is not intended to be committed.
 
+`install.ps1` waits up to 45 seconds for the bridge `/health` endpoint. If startup still fails, it prints the bridge logs automatically instead of only reporting a connection-refused error.
+
 ## 12. Verify the bridge inside Windows
 
 From `C:\InventorVmBridge`:
@@ -271,12 +274,110 @@ Logs are written to:
 C:\InventorVmBridge\logs\
 ```
 
-## 13. Verify from Ubuntu
+## 13. Prepare the Ubuntu bridge client configuration
 
-First confirm the VM address:
+Return to the Ubuntu host and change into the root of this repository. The supplied package contains a hidden file named:
+
+```text
+.bridge-client.env
+```
+
+A normal `ls` does not show dotfiles. Verify it with:
+
+```bash
+pwd
+ls -la .bridge-client.env
+chmod 600 .bridge-client.env
+```
+
+The Ubuntu client configuration has four important values:
+
+```dotenv
+VM_NAME="inventor-win11"
+VM_IP="192.168.122.123"
+INVENTOR_BRIDGE_PORT="8765"
+INVENTOR_BRIDGE_TOKEN="<same token used by C:\InventorVmBridge\.env>"
+```
+
+### `VM_IP` is the recommended bridge target
+
+Set `VM_IP` explicitly rather than relying on automatic VM address discovery. This avoids a dependency on `qemu-guest-agent` and avoids differences between libvirt address sources.
+
+For the VM used while preparing this package, the confirmed libvirt DHCP lease is:
+
+```text
+192.168.122.123
+```
+
+The supplied `.bridge-client.env` is already populated with that address. Verify the current lease on Ubuntu with:
+
+```bash
+virsh --connect qemu:///system domifaddr inventor-win11 --source lease
+```
+
+Expected shape:
+
+```text
+Name    MAC address          Protocol   Address
+vnet0   52:54:00:...         ipv4       192.168.122.123/24
+```
+
+To detect the current DHCP lease and save it into `.bridge-client.env`, run:
+
+```bash
+bash scripts/linux/set-vm-ip.sh
+```
+
+Or, if you obtained the IPv4 address from `ipconfig` inside Windows, save it explicitly:
+
+```bash
+bash scripts/linux/set-vm-ip.sh 192.168.122.123
+```
+
+The helper updates only `VM_IP`; it does not change your API token.
+
+If the VM is recreated or receives a different DHCP lease later, rerun `set-vm-ip.sh` before starting Rishika.
+
+### Bridge token
+
+The Linux value `INVENTOR_BRIDGE_TOKEN` must exactly match the Windows value in:
+
+```text
+C:\InventorVmBridge\.env
+```
+
+To inspect the Windows value without editing the file, run in PowerShell:
+
+```powershell
+Select-String -Path C:\InventorVmBridge\.env -Pattern '^INVENTOR_BRIDGE_TOKEN='
+```
+
+Do not post or commit that token.
+
+### If `.bridge-client.env` is missing
+
+Create it from the example:
+
+```bash
+cp .bridge-client.env.example .bridge-client.env
+chmod 600 .bridge-client.env
+nano .bridge-client.env
+```
+
+Fill in `VM_IP`, `INVENTOR_BRIDGE_PORT`, and `INVENTOR_BRIDGE_TOKEN` before continuing.
+
+## 14. Verify from Ubuntu
+
+First verify the address the client will actually use:
 
 ```bash
 bash scripts/linux/vm-ip.sh
+```
+
+With this deployment it should print:
+
+```text
+192.168.122.123
 ```
 
 Then test the complete route:
@@ -289,43 +390,57 @@ Expected result shape:
 
 ```json
 {"status":"ready","worker_alive":true}
-{"inventor_connected":true,"inventor_version":"..."}
+{"inventor_connected":true,"inventor_version":"2026.4"}
 ```
 
 This proves:
 
 ```text
-Ubuntu -> libvirt VM network -> Windows HTTP bridge -> pywin32 -> Inventor.Application
+Ubuntu -> VM_IP:8765 -> Windows bridge -> pywin32 -> Inventor.Application
 ```
 
-If automatic IP discovery fails, run `ipconfig` in Windows and put the IPv4 address into `VM_IP` in `windows-vm.env`.
+You can also test raw HTTP networking independently of the token:
 
-## 14. Install/configure Rishika on Ubuntu
-
-Extract the supplied Rishika replacement archive to its permanent directory.
-
-The matching archive is already configured for the same bridge token and defaults to:
-
-```dotenv
-INVENTOR_BACKEND=remote
-INVENTOR_BRIDGE_URL=auto
-INVENTOR_VM_NAME=inventor-win11
-INVENTOR_BRIDGE_PORT=8765
+```bash
+curl -v --max-time 5 "http://$(bash scripts/linux/vm-ip.sh):8765/health"
 ```
 
-If you need to resynchronize the settings after changing tokens or using another Rishika copy, from this repository run:
+If `vm-ip.sh` prints nothing or errors, verify `.bridge-client.env` contains `VM_IP`. If needed, refresh it with `bash scripts/linux/set-vm-ip.sh`.
+
+Automatic discovery is still available as a fallback when `VM_IP` is absent. The script now tries the libvirt DHCP `lease` source first and tolerates unavailable `agent`/`arp` sources instead of aborting. Explicit `VM_IP` remains the recommended setup.
+
+## 15. Install/configure Rishika on Ubuntu
+
+Extract the supplied Rishika package to its permanent directory.
+
+Synchronize Rishika with this repository's configured bridge target and token:
 
 ```bash
 bash scripts/linux/configure-rishika.sh /path/to/Rishika
 ```
 
-If Rishika runs directly on this Ubuntu/libvirt host, `INVENTOR_BRIDGE_URL=auto` discovers the VM address through libvirt. If Rishika runs in Docker or on another host, set an explicit private URL in Rishika's `.env`:
+The script writes an explicit bridge URL based on `VM_IP`, for example:
 
 ```dotenv
-INVENTOR_BRIDGE_URL=http://<windows-vm-ip>:8765
+INVENTOR_BACKEND=remote
+INVENTOR_BRIDGE_URL=http://192.168.122.123:8765
+INVENTOR_BRIDGE_TOKEN=<matching private token>
+INVENTOR_VM_NAME=inventor-win11
+INVENTOR_BRIDGE_PORT=8765
 ```
 
-## 15. Validate Rishika before normal use
+Using an explicit URL means Rishika does not need to perform its own libvirt IP discovery.
+
+If the VM address changes later:
+
+```bash
+bash scripts/linux/set-vm-ip.sh
+bash scripts/linux/configure-rishika.sh /path/to/Rishika
+```
+
+Then rerun `bridge-health.sh` before using the application.
+
+## 16. Validate Rishika before normal use
 
 From the Rishika directory:
 
@@ -341,7 +456,7 @@ python3 scripts/test_inventor_bridge.py /path/to/example.ipt
 
 For assemblies with referenced parts, send the assembly as a ZIP containing the root `.iam` and its referenced `.ipt` files with their relative directory layout preserved.
 
-## 16. Normal startup order after installation
+## 17. Normal startup order after installation
 
 Once everything is installed, the daily/startup sequence is much shorter:
 
@@ -376,7 +491,7 @@ cd /path/to/Rishika
 
 No VNC connection needs to remain open during normal automation. VNC is only needed when you need to interact with the Windows desktop, Autodesk sign-in, dialogs, updates or troubleshooting.
 
-## 17. Shutdown order
+## 18. Shutdown order
 
 Close/stop Rishika work first. If desired, leave Inventor and the bridge running until Windows shuts down.
 
@@ -388,12 +503,13 @@ bash scripts/linux/stop-windows-vm.sh
 
 Avoid `virsh destroy` except for recovery from a hung guest because it is equivalent to pulling power.
 
-## 18. Diagnostics
+## 19. Diagnostics
 
 Ubuntu-side checks:
 
 ```bash
 bash scripts/linux/doctor.sh
+bash scripts/linux/set-vm-ip.sh
 bash scripts/linux/vm-ip.sh
 bash scripts/linux/bridge-health.sh
 ```
@@ -420,7 +536,7 @@ If `/health` works but `/v1/status` fails, networking is working and the problem
 
 If Ubuntu cannot reach `/health`, verify the guest IPv4, Windows Firewall rule, libvirt network, bridge process and port.
 
-## 19. Security notes
+## 20. Security notes
 
 - Keep TCP 8765 on a private VM/LAN network; do not port-forward it from the public internet.
 - `/v1/*` requires the generated API token.
@@ -428,7 +544,7 @@ If Ubuntu cannot reach `/health`, verify the guest IPv4, Windows Firewall rule, 
 - VNC binds only to Ubuntu `127.0.0.1`; use SSH tunnelling rather than opening the VNC port publicly.
 - Rotate `INVENTOR_BRIDGE_TOKEN` in both Windows and Rishika/Ubuntu if the token is exposed.
 
-## 20. Reference requirements
+## 21. Reference requirements
 
 At the time this package was prepared, Autodesk lists Windows 10/11 x64 for Inventor 2026, with 32 GB RAM recommended (16 GB minimum for smaller assemblies), 40 GB for the installation, and DirectX-capable graphics. Microsoft requires Windows 11 VMs to provide UEFI/Secure-Boot-capable firmware and TPM 2.0. Ubuntu documents KVM/libvirt as its standard server virtualization stack.
 

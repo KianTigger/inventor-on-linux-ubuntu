@@ -16,7 +16,17 @@ checks=$((checks+1))
 checks=$((checks+1))
 [[ -f "$ROOT/windows-vm.env" ]] && ok "windows-vm.env configured" || fail "windows-vm.env missing"
 checks=$((checks+1))
-[[ -f "$ROOT/.bridge-client.env" ]] && ok ".bridge-client.env present" || fail ".bridge-client.env missing"
+if [[ -f "$ROOT/.bridge-client.env" ]]; then
+    ok ".bridge-client.env present"
+    # shellcheck disable=SC1091
+    source "$ROOT/.bridge-client.env"
+    checks=$((checks+1))
+    [[ -n "${VM_IP:-}" ]] && ok "VM_IP configured: $VM_IP" || fail "VM_IP missing from .bridge-client.env"
+    checks=$((checks+1))
+    [[ -n "${INVENTOR_BRIDGE_TOKEN:-}" ]] && ok "bridge token configured" || fail "bridge token missing"
+else
+    fail ".bridge-client.env missing"
+fi
 
 if command -v virsh >/dev/null 2>&1; then
     checks=$((checks+1))
