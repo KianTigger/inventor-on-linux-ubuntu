@@ -5,7 +5,7 @@ import shutil
 import zipfile
 from pathlib import Path
 
-ALLOWED_INPUT_EXTENSIONS = {".ipt", ".iam", ".step", ".stp", ".zip"}
+ALLOWED_INPUT_EXTENSIONS = {".ipt", ".iam", ".step", ".stp", ".zip", ".dwg", ".dxf", ".stl", ".png", ".jpg", ".jpeg"}
 
 
 def safe_extract_zip(zip_path: Path, destination: Path) -> None:
